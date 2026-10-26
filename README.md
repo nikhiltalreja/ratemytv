@@ -183,12 +183,19 @@ Capture steps and the full six-screen set: [docs/SCREENSHOTS.md](docs/SCREENSHOT
 
 ## Feature demos
 
-![The overlay workflow: what is playing, then the card over it with the IMDb score](docs/demo-overlay.gif)
+**Long-press the remote while a title is playing.**
+Play for a few seconds, then hold the remote's app key: the card opens over playback
+with The Bear's IMDb score.
 
-A two-slide overview, built from the card's own still: what is playing, then the card
-over it, with The Bear's IMDb score in focus.
+![Long-press the remote while The Bear plays; the card opens with its IMDb score](docs/demo-overlay.gif)
 
-Recorded on the TV itself. JioHotstar in front, remote only.
+**Your IMDb, connected to the apps installed on your TV.**
+Watch These joins the ratings to what each installed service actually carries. Choose a
+pick; that service opens.
+
+![Watch These: choose a pick and its service opens](docs/demo-watch-these.gif)
+
+The demos below are recorded on the TV itself — JioHotstar in front, remote only.
 
 ### Ratings
 

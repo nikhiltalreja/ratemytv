@@ -1,7 +1,6 @@
 # Screenshots
 
-Six use cases, one image each. The first five were captured on **1.0.6**, light theme;
-**Watch These** is on hold while the cross-app browser is rebuilt.
+Six use cases, one image each, captured on **1.0.6**, light theme.
 
 | # | Use case | File | Status |
 |---|---|---|---|
@@ -10,7 +9,10 @@ Six use cases, one image each. The first five were captured on **1.0.6**, light 
 | 3 | Stats | `docs/shot-stats.png` | captured |
 | 4 | Settings | `docs/shot-settings.png` | captured |
 | 5 | Menu | `docs/shot-menu.png` | captured |
-| 6 | Watch These | `docs/shot-watch-these.png` | on hold |
+| 6 | Watch These | `docs/shot-watch-these-1.0.6.png` | captured |
+
+`docs/shot-watch-these.png` and `docs/shot-watch-these-light.png` are the README's
+Watch These images; the six-screen set above has its own capture.
 
 ## Before you capture
 
@@ -62,9 +64,12 @@ From a row, press `LEFT` to open the menu: `WATCHING`, `WATCH THESE`, `STATS`,
 `SETTINGS`, `SORT`, `LAYOUT`, `THEME`, `CLEAR HISTORY`. Capture with the first item
 focused. `BACK` closes the menu; a second `BACK` closes the card.
 
-## 6. Watch These — on hold
+## 6. Watch These
 
-The tab is being rebuilt as a cross-app browser. Do not capture it until that lands.
+Select `WATCH THESE`. The rail on the left lists the services installed on this TV,
+with a count; the collection on the right is the selected service's 2026 picks, headed
+`NETFLIX · 6 TITLES`. Services without an app stay in the rail, dimmed and labelled
+"Not installed · install". Capture with a service that has picks selected.
 
 ## Rules
 

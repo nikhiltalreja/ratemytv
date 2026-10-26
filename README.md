@@ -25,7 +25,7 @@ app, with no search.
 <p align="center">
   <a href="#what-it-does">What it does</a> ·
   <a href="#install">Install</a> ·
-  <a href="#long-press-the-remote">Remote key</a> ·
+  <a href="#one-button-while-watching">Remote button</a> ·
   <a href="#app-support">App support</a> ·
   <a href="#screenshots">Screenshots</a> ·
   <a href="#bookmarks">Bookmarks</a> ·
@@ -102,23 +102,52 @@ need it.
 
 </details>
 
-### Long-press the remote
-
-Optional. Turn on **Rate My TV** under Settings → Accessibility; that is what lets a
-long press of the Netflix key open the card. The service only reads key presses, never
-screen content.
-
-Only one accessibility service can take a key. If another launcher's key helper is
-already on, turn one of them off.
-
-Other buttons cannot be remapped inside the app yet.
-
 ### Updating
 
 The app checks GitHub for a newer release when the card opens (and re-checks every two
 hours). When one exists, a banner offers **Install**, which downloads the APK and opens
 Android's own installer. Same signing key, so the update keeps your history and
 bookmarks.
+
+## One button while watching
+
+Rate My TV has no remote-key settings of its own. To open the card from the couch, give
+one button to a TV key mapper. Both of these work with the player in front and can
+launch **Rate My TV** on a long press.
+
+| | **tvQuickActions** | **Button Mapper** |
+|---|---|---|
+| Made for | Android TV / Google TV, remote-first | Phones first, but remaps remotes |
+| Price | Free; **Pro $3.99** | Free; Pro optional |
+| Xiaomi Netflix button | **Pro** says it supports it | May not see a key the firmware consumes |
+| Long press | Up to five actions on one button | Single, double and long press |
+
+### tvQuickActions (recommended)
+
+1. Install [tvQuickActions](https://play.google.com/store/apps/details?id=dev.vodik7.tvquickactions.free)
+   from the Play Store. The free version maps most buttons; **Pro** is the one that
+   explicitly supports the Netflix button on Xiaomi TVs.
+2. Open it and allow its **Accessibility service**. That is how it sees the remote's key
+   before the player does.
+3. Add the button you want to give up, usually the Netflix key.
+4. Set **Long press → Open app → Rate My TV**. Leave **Single press** as it is, so the
+   button still does its old job.
+5. Save. While watching, hold the button: the card opens over the player.
+
+### Button Mapper
+
+1. Install [Button Mapper](https://play.google.com/store/apps/details?id=flar2.homebutton)
+   and allow its accessibility service.
+2. Add the remote button, set **Long press → Apps → Rate My TV**, and leave the single
+   press alone.
+3. Its UI is made for phones, so the D-pad can be fiddly; a mouse helps. If the TV's
+   Play Store does not list it, the APK is on
+   [elementalx.org](https://elementalx.org/button-mapper/).
+
+Neither app needs root to launch an app. Only one accessibility service can take a
+key: if Rate My TV's own accessibility service is already on, turn it off before using
+a mapper. Fire TV has no Play Store; use the mapper from the Amazon Appstore if it is
+there, or sideload its APK.
 
 ## App support
 

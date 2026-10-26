@@ -2728,19 +2728,27 @@ public class OverlayController {
                         if (root == null || tab != TAB_STATS) return;
                         clearList();
                         vList.addView(header("YOUR MONTH"));
-                        vList.addView(statRow(
+                        // All four in one line. Three stacked card rows made this the
+                        // only screen that scrolled, for numbers you read in a glance.
+                        vList.addView(statRow4(
                                 stat("WATCHED THIS MONTH", String.valueOf(monthCount),
                                         monthCount == 1 ? "title" : "titles"),
                                 stat("AVERAGE RATING", avg,
                                         ratedCount > 0 ? ratedCount + " rated"
-                                                : "no ratings yet")));
-                        vList.addView(statRow(
+                                                : "no ratings yet"),
                                 stat("STRONG TITLES", String.valueOf(strongCount),
                                         "IMDb above 6.0"),
                                 stat("AWFUL TITLES", String.valueOf(awfulCount),
                                         "IMDb below 6.0")));
-                        vList.addView(wide(stat("IN HISTORY", String.valueOf(total),
-                                "titles recorded on this TV")));
+
+                        TextView inHistory = new TextView(vCtx);
+                        inHistory.setText(total + (total == 1 ? " title" : " titles")
+                                + " recorded on this TV");
+                        inHistory.setTextSize(13);
+                        inHistory.setTextColor(dim());
+                        inHistory.setPadding(6, 2, 6, 0);
+                        vList.addView(inHistory);
+
                         TextView note = new TextView(vCtx);
                         note.setText("Counted from what this TV actually played, plus the apps' own lists.");
                         note.setTextSize(12);
@@ -2753,6 +2761,24 @@ public class OverlayController {
                 });
             }
         }).start();
+    }
+
+    /** Four cards on one line, so the stats fit without scrolling. */
+    static LinearLayout statRow4(LinearLayout a, LinearLayout b, LinearLayout c,
+                                 LinearLayout d) {
+        LinearLayout row = new LinearLayout(vCtx);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setLayoutParams(new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        LinearLayout[] cells = {a, b, c, d};
+        for (int i = 0; i < cells.length; i++) {
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.MATCH_PARENT, 1f);
+            lp.rightMargin = i == cells.length - 1 ? 0 : 12;
+            lp.bottomMargin = 6;
+            row.addView(cells[i], lp);
+        }
+        return row;
     }
 
     /** Two cards per line, equal width. */
@@ -2793,7 +2819,7 @@ public class OverlayController {
         LinearLayout box = new LinearLayout(vCtx);
         box.setOrientation(LinearLayout.VERTICAL);
         box.setPadding(22, 18, 22, 18);
-        box.setMinimumHeight(150);
+        box.setMinimumHeight(124);
         box.setBackground(rounded(rowTint(), 18, stroke()));
 
         TextView l = new TextView(vCtx);

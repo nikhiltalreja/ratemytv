@@ -27,6 +27,14 @@
         <package android:name="com.netflix.ninja" />
         <package android:name="com.amazon.amazonvideo.livingroom" />
         <package android:name="com.apple.atve.androidtv.appletv" />
+        <!-- The rest of the Watch These rail: Android 11+ hides these packages from
+             us without an entry here, and then a service that is installed looks
+             missing - MX Player was wrongly reported as absent for exactly that. -->
+        <package android:name="com.mxtech.videoplayer.television" />
+        <package android:name="com.mxtech.videoplayer.ad" />
+        <package android:name="com.zee5.hipi" />
+        <package android:name="com.hoichoi" />
+        <package android:name="com.crunchyroll.crunchyroid" />
         <!-- Also needed to read their launcher icons for the no-artwork tiles. -->
         <package android:name="com.google.android.youtube.tv" />
         <package android:name="com.google.android.youtube.tvmusic" />

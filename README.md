@@ -224,10 +224,10 @@ from another app, and stats is the `STATS` tab.
 
 ## Using the card
 
-`WATCHING` lists titles this TV has played. `WATCH THESE` lists 2026 series above
-7.0 on IMDb across the nine services it covers, one section per installed app. `STATS`
-summarises the month. `SETTINGS` holds the OMDb key, the theme, and the version (with the
-update state).
+`WATCHING` lists titles this TV has played. `WATCH THESE` is two panes: the services
+installed on this TV on the left, the selected service's 2026 picks on the right.
+`STATS` summarises the month. `SETTINGS` holds the OMDb key, the theme, and the version
+(with the update state).
 
 | Key | Action |
 |---|---|
@@ -237,6 +237,13 @@ update state).
 | Right, Left | Cycle the focused row's actions: `RESUME`, `+ Bookmark`, then each saved scene and its delete |
 | OK | Activate the highlighted action |
 | Back | Close the card |
+
+In `WATCH THESE` a key never means two things — the pane with focus decides:
+
+| Focus | Up / Down | Left / Right | OK |
+|---|---|---|---|
+| Service rail (left) | Previous / next service | Right enters that service's page | Open the page |
+| Collection (right) | Previous / next title | Left returns to the rail | Open the title in its app |
 
 Only the focused row draws `RESUME` in the accent colour; the rest stay dark, so the
 active control is unambiguous.
@@ -271,11 +278,27 @@ listed twice. Rating must be strictly above 7.0 with at least 1 000 votes; the r
 sorted by rating then votes and **capped at six per service** — Netflix alone had 36
 qualifying series, which is a catalogue, not a shortlist. 28 rows on the test TV.
 
-The panel draws one section per service — `ON JIOHOTSTAR`, `ON NETFLIX`, `ON PRIME VIDEO`,
-`ON ZEE5`, `ON SONY LIV`, `ON MX PLAYER`, `ON APPLE TV`, `ON HOICHOI`, `ON CRUNCHYROLL` —
-and skips a service whose app is not installed, naming it in a footnote instead
-("Not installed on this TV: ZEE5 and Hoichoi"). Install the app and its section appears
-on the next open.
+The panel is **two panes**: a rail of services on the left — a wide wordmark in each
+brand's own colour, with its count — and one service's collection on the right, headed
+`APPLE TV · 5 TITLES`. The rail remembers the last service you opened, and scrolls when
+there are more services than fit.
+
+A service whose app this TV cannot open stays in the rail, dimmed, labelled
+**"Not installed · install"**, and its page shows the same picks with an `INSTALL` action:
+OK opens the Play Store listing, so a missing service is one press from being added.
+`NEW SEASONS` is the last tile — the hand-checked row from below, kept out of the live
+pages because it is curated, not fetched.
+
+"Installed" means **launchable**, not merely present: this Mi TV ships an enabled SonyLIV
+(real app, leanback launcher) and a *disabled* MX Player preload, and an existence check
+had counted the disabled one as available.
+
+The wordmarks are drawn as type. A real logo would have to be a bundled asset — there is
+no trustworthy, licence-clean source a TV can fetch at runtime, and a scraped mark that
+sits wrong looks worse than clean type. Drop an official PNG at
+`app/assets/logos/<key>.png` (`netflix.png`, `prime-video.png`, `jiohotstar.png`,
+`sonymliv.png`…) and the rail uses it instead, no code change: the loader checks that path
+first.
 
 Not listed, because the ratings catalogue carries no offers for them in this market, so
 there is nothing to join against: **Aha, Sun NXT, ETV Win, ManoramaMAX**. Amazon and Apple

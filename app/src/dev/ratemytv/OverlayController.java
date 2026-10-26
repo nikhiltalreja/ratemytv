@@ -55,6 +55,16 @@ public class OverlayController {
     static int vListW;
     static int vCardW;
     static ScrollView vScroll;
+    /** WATCH THESE is two panes: services on the left, one collection on the right. */
+    static LinearLayout vTheseWrap, vRail, vThesePane, vTheseList;
+    static ScrollView vTheseScroll, vRailScroll;
+    static TextView vRailFoot;
+    static TextView vPaneTitle;
+    /** Where addPickRow() appends, and which scroller it keeps in view. */
+    static ViewGroup vRowSink;
+    static ScrollView vRowScroll;
+    /** True while drawing a page for a service whose app is not installed. */
+    static boolean vInstallMode;
     static TextView vTab0, vTab1, vTab2, vTab3, vSort, vLayout;
     /** What is playing, in the tab row. Replaces the NOW WATCHING panel. */
     static TextView vTicker;
@@ -165,6 +175,19 @@ public class OverlayController {
                     || (vTab3 != null && vTab3.isFocused());
         }
 
+        /** Focus is somewhere inside the WATCH THESE two-pane body. */
+        static boolean inThesePane() {
+            View f = vList == null ? null : root.findFocus();
+            if (f == null) return false;
+            View p = f;
+            while (p != null) {
+                if (p == vTheseWrap) return true;
+                if (!(p.getParent() instanceof View)) break;
+                p = (View) p.getParent();
+            }
+            return false;
+        }
+
         @Override public boolean dispatchKeyEventPreIme(KeyEvent e) {
             if (back(e)) {
                 if (menuOpen) closeMenu();
@@ -187,7 +210,9 @@ public class OverlayController {
                     closeMenu();
                     return true;
                 }
-                if (!onTabRow()) {
+                // The WATCH THESE pane owns LEFT while its rows have focus: it steps
+                // back to the service rail, which is a movement, not a menu.
+                if (!onTabRow() && !inThesePane()) {
                     openMenu();
                     return true;
                 }
@@ -436,6 +461,65 @@ public class OverlayController {
         vList.setOrientation(LinearLayout.VERTICAL);
         vScroll.addView(vList);
         card.addView(vScroll);
+
+        // The WATCH THESE body: a rail of services and one collection beside it. It
+        // shares the card's height with the scroll above; buildTab() shows one or the
+        // other, so both can keep a weight of 1 without fighting.
+        vTheseWrap = new LinearLayout(vCtx);
+        vTheseWrap.setOrientation(LinearLayout.HORIZONTAL);
+        vTheseWrap.setLayoutParams(new LinearLayout.LayoutParams(listW, 0, 1f));
+        vTheseWrap.setVisibility(View.GONE);
+
+        vRail = new LinearLayout(vCtx);
+        vRail.setOrientation(LinearLayout.VERTICAL);
+        vRail.setPadding(0, 4, 10, 4);
+        // Nine services do not fit the card at 1080p, so the rail scrolls itself;
+        // D-pad focus already brings the selected tile into view.
+        vRailScroll = new ScrollView(vCtx);
+        vRailScroll.setVerticalScrollBarEnabled(false);
+        vRailScroll.setVerticalFadingEdgeEnabled(true);
+        vRailScroll.setFadingEdgeLength(30);
+        vRailScroll.addView(vRail);
+
+        // The footnote sits outside the scroll, pinned to the bottom of the rail:
+        // inside it, the "not installed" line was clipped by the card's edge.
+        LinearLayout railCol = new LinearLayout(vCtx);
+        railCol.setOrientation(LinearLayout.VERTICAL);
+        railCol.addView(vRailScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+        vRailFoot = new TextView(vCtx);
+        vRailFoot.setTextSize(11);
+        vRailFoot.setTextColor(dim2());
+        vRailFoot.setLineSpacing(0, 1.15f);
+        vRailFoot.setPadding(8, 8, 4, 2);
+        railCol.addView(vRailFoot, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        vTheseWrap.addView(railCol, new LinearLayout.LayoutParams(
+                dp(212), ViewGroup.LayoutParams.MATCH_PARENT));
+
+        vThesePane = new LinearLayout(vCtx);
+        vThesePane.setOrientation(LinearLayout.VERTICAL);
+
+        vPaneTitle = new TextView(vCtx);
+        vPaneTitle.setTextSize(13);
+        vPaneTitle.setLetterSpacing(0.10f);
+        vPaneTitle.setTextColor(dim());
+        vPaneTitle.setPadding(4, 8, 4, 10);
+        vThesePane.addView(vPaneTitle);
+
+        vTheseScroll = new ScrollView(vCtx);
+        vTheseScroll.setVerticalScrollBarEnabled(false);
+        vTheseScroll.setVerticalFadingEdgeEnabled(true);
+        vTheseScroll.setFadingEdgeLength(40);
+        vTheseList = new LinearLayout(vCtx);
+        vTheseList.setOrientation(LinearLayout.VERTICAL);
+        vTheseScroll.addView(vTheseList);
+        vThesePane.addView(vTheseScroll, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        vTheseWrap.addView(vThesePane, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
+        card.addView(vTheseWrap);
 
         // CREDIT: the @nikhiltalrejasocial footer must stay in every build.
         // Do not remove it, hide it, make it configurable, or move it off-screen.
@@ -722,6 +806,13 @@ public class OverlayController {
                     vSorter.setLayoutParams(slp);
                 }
             }
+            if (vTheseWrap != null) {
+                android.view.ViewGroup.LayoutParams wlp = vTheseWrap.getLayoutParams();
+                if (wlp instanceof LinearLayout.LayoutParams && wlp.width != w) {
+                    wlp.width = w;
+                    vTheseWrap.setLayoutParams(wlp);
+                }
+            }
         }
         // Whichever tab is being built clears the list when it has something to show.
         // Clearing here meant the pane sat empty for the whole worker round trip, which
@@ -733,6 +824,10 @@ public class OverlayController {
         // could scroll back up to it.
         scrollTopNext = tab != lastBuiltTab;
         lastBuiltTab = tab;
+        // WATCH THESE swaps the single scrolling list for its two-pane body.
+        boolean twoPane = tab == TAB_THESE;
+        if (vScroll != null) vScroll.setVisibility(twoPane ? View.GONE : View.VISIBLE);
+        if (vTheseWrap != null) vTheseWrap.setVisibility(twoPane ? View.VISIBLE : View.GONE);
         if (tab == TAB_WATCHING) {
             // Coming back to a list we built seconds ago: paint it in this frame, then
             // let the worker confirm it. Without this the tab sat on the previous
@@ -1146,12 +1241,16 @@ public class OverlayController {
         row.setFocusableInTouchMode(true);
         row.setClickable(true);
         row.setOnKeyListener(BACK);
-        row.setPadding(34, 24, 34, 24);
+        // 26, not 24: the poster, the title and the RESUME pill now share one top line,
+        // and the whole block wanted a couple of pixels of air above it.
+        row.setPadding(34, 26, 34, 24);
         row.setBackground(rounded(rowTint(), 18, stroke()));
 
         h.poster = new ImageView(vCtx);
         LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(126, 173);
-        plp.topMargin = 2;
+        // 6: a 24 sp line carries about 12 px of ascent above the cap, so the art drops
+        // to meet the letters instead of the line box.
+        plp.topMargin = dp(6);
         h.poster.setLayoutParams(plp);
         h.poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
         h.poster.setBackground(rounded(0x33000000, 10, 0));
@@ -1159,7 +1258,7 @@ public class OverlayController {
 
         LinearLayout body = new LinearLayout(vCtx);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(22, 0, 0, 0);
+        body.setPadding(22, dp(1), 0, 0);
         row.addView(body, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -1340,7 +1439,7 @@ public class OverlayController {
         // 18 on the right, not 4: the pill fills this rail's width, so its right edge
         // sat 20 px from the row's visible border - tighter than any other gap on the
         // card, and close enough to read as touching the rounded corner.
-        rightCol.setPadding(22, 0, 18, 0);
+        rightCol.setPadding(22, dp(6), 18, 0);
         final TextView resume = resumePill(false);
         resumeRef[0] = resume;
         if (row.getId() == View.NO_ID) row.setId(View.generateViewId());
@@ -2448,8 +2547,40 @@ public class OverlayController {
      * rebuilds itself if a refresh lands while it is open. Text only - no poster, no
      * plot, no cast - so a refresh costs about 45 KB, not one lookup per title.
      */
+    /** One service's page in the right pane. */
+    static class Sheet {
+        final String key;
+        final String title;
+        final List<WatchThese.Pick> rows;
+        final boolean curated;
+        /** False when the service's app cannot be opened on this TV: an install prompt. */
+        final boolean installed;
+
+        Sheet(String key, String title, List<WatchThese.Pick> rows, boolean curated,
+              boolean installed) {
+            this.key = key;
+            this.title = title;
+            this.rows = rows;
+            this.curated = curated;
+            this.installed = installed;
+        }
+    }
+
+    static List<Sheet> vSheets = new ArrayList<Sheet>();
+    static List<View> vRailViews = new ArrayList<View>();
+    static int vSheetIndex;
+
+    /**
+     * Two panes: every installed service on the left, that service's collection on the
+     * right. The rail changes the service; the collection scrolls within it. One key,
+     * one meaning — Up/Down on the left is "next service", Up/Down on the right is
+     * "next title", and Left/Right crosses between them.
+     */
     static void buildThese() {
-        clearList();
+        if (vTheseWrap == null) return;
+        vRail.removeAllViews();
+        vTheseList.removeAllViews();
+        vRailViews.clear();
         vTopRow = null;
 
         boolean refreshing = WatchThese.stale(vCtx);
@@ -2458,99 +2589,237 @@ public class OverlayController {
         if (!live) picks = WatchThese.seed();
         if (refreshing) WatchThese.refresh(vCtx, false);
 
-        // Where the list came from, on the same line as the title: five rows plus a
-        // footer note do not fit the card, and this says more than the note did.
-        LinearLayout headRow = new LinearLayout(vCtx);
-        headRow.setOrientation(LinearLayout.HORIZONTAL);
-        headRow.setGravity(Gravity.CENTER_VERTICAL);
-        headRow.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        headRow.addView(header("WATCH THESE"), new LinearLayout.LayoutParams(
-                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
-
-        TextView source = new TextView(vCtx);
-        source.setText(picks.size() + (picks.size() == 1 ? " title" : " titles")
-                + (live ? " \u00B7 updated " + age(WatchThese.cachedAt(vCtx))
-                        : " \u00B7 saved " + WatchThese.SEED_CHECKED));
-        source.setTextSize(11);
-        source.setTextColor(dim2());
-        source.setPadding(0, 14, 4, 8);
-        headRow.addView(source);
-        vList.addView(headRow);
-
-        TextView intro = new TextView(vCtx);
-        boolean anyInstalled = false;
-        for (String[] prov : WatchThese.PROVIDERS) {
-            if (appInstalled(prov[1])) anyInstalled = true;
-        }
-        intro.setText("Series that started in 2026, above "
-                + String.format(java.util.Locale.US, "%.1f", WatchThese.MIN_RATING)
-                + " on IMDb, on the services installed on this TV. OK opens one.");
-        intro.setTextSize(13);
-        intro.setTextColor(dim());
-        intro.setLineSpacing(0, 1.12f);
-        intro.setPadding(6, 0, 6, 8);
-        vList.addView(intro);
-
-        if (refreshing) {
-            TextView wait = new TextView(vCtx);
-            wait.setText(live ? "Refreshing titles, scores and availability\u2026"
-                    : "Fetching scores and where each title streams\u2026");
-            wait.setTextSize(12);
-            wait.setTextColor(dim2());
-            wait.setPadding(6, 0, 6, 6);
-            vList.addView(wait);
-        }
-
-        // One section per service, in the app's order. A service whose app is not on
-        // this TV is skipped, because its rows could not be opened; when nothing at
-        // all is installed the sections are drawn anyway, so the panel is never empty.
-        java.util.LinkedHashMap<String, List<WatchThese.Pick>> byProvider =
-                new java.util.LinkedHashMap<String, List<WatchThese.Pick>>();
-        for (String[] prov : WatchThese.PROVIDERS) {
-            byProvider.put(prov[1], new ArrayList<WatchThese.Pick>());
-        }
-        for (WatchThese.Pick p : picks) {
-            List<WatchThese.Pick> bucket = byProvider.get(p.provider);
-            if (bucket != null) bucket.add(p);
-        }
-
         List<String> missing = new ArrayList<String>();
-        View firstRow = addSections(byProvider, anyInstalled, missing);
-        if (firstRow == null) {
-            missing.clear();
-            firstRow = addSections(byProvider, false, missing);
+        vSheets = new ArrayList<Sheet>();
+        List<Sheet> have = new ArrayList<Sheet>();
+        List<Sheet> absent = new ArrayList<Sheet>();
+        for (String[] prov : WatchThese.PROVIDERS) {
+            List<WatchThese.Pick> rows = new ArrayList<WatchThese.Pick>();
+            for (WatchThese.Pick p : picks) {
+                if (p.provider.equals(prov[1])) rows.add(p);
+            }
+            if (rows.isEmpty()) continue;
+            boolean ok = appInstalled(prov[1]);
+            if (!ok) missing.add(pretty(prov[1]));
+            Sheet sheet = new Sheet(prov[1], pretty(prov[1]), rows, false, ok);
+            (ok ? have : absent).add(sheet);
         }
-        if (!missing.isEmpty()) {
-            TextView note = new TextView(vCtx);
-            note.setText("Not installed on this TV: " + join(missing) + ".");
-            note.setTextSize(12);
-            note.setTextColor(dim2());
-            note.setPadding(6, 10, 6, 4);
-            vList.addView(note);
-        }
-
-        // Returning shows, hand-checked: the live join above cannot see them, because
-        // it selects on the series' original year and a 2026 season does not change
-        // that. See WatchThese.returning().
+        // Installed services first: the rail is a shelf of what you can press, and the
+        // rest double as install prompts rather than disappearing.
+        vSheets.addAll(have);
+        vSheets.addAll(absent);
         List<WatchThese.Pick> again = WatchThese.returning();
         if (!again.isEmpty()) {
-            vList.addView(header("NEW SEASONS IN 2026"));
-            TextView why = new TextView(vCtx);
-            why.setText("Returning series with a season that premiered this year. "
-                    + "Checked by hand: the list above only knows shows that started in 2026.");
-            why.setTextSize(12);
-            why.setTextColor(dim2());
-            why.setLineSpacing(0, 1.1f);
-            why.setPadding(6, 0, 6, 8);
-            vList.addView(why);
-            for (WatchThese.Pick p : again) {
-                addPickSeason(p);
-            }
+            vSheets.add(new Sheet("NEW", "New seasons", again, true, true));
         }
 
-        maybeScrollTop();
-        if (firstRow != null) firstRow.requestFocus();
+        if (vSheets.isEmpty()) {
+            TextView none = new TextView(vCtx);
+            none.setText("No streaming app on this TV carries a 2026 series above 7.0 yet.");
+            none.setTextSize(13);
+            none.setTextColor(dim());
+            none.setPadding(6, 12, 6, 0);
+            vTheseList.addView(none);
+            vPaneTitle.setText("WATCH THESE");
+            return;
+        }
+
+        String saved = vCtx.getSharedPreferences("xray", Context.MODE_PRIVATE)
+                .getString("theseSheet", "");
+        int sel = 0;
+        for (int i = 0; i < vSheets.size(); i++) {
+            if (vSheets.get(i).key.equals(saved)) sel = i;
+        }
+
+        for (int i = 0; i < vSheets.size(); i++) {
+            final int index = i;
+            vRail.addView(railTile(vSheets.get(i), index));
+        }
+
+        StringBuilder fb = new StringBuilder();
+        fb.append(live ? "Updated " + age(WatchThese.cachedAt(vCtx)) : "Saved list");
+        if (!missing.isEmpty()) fb.append("\nNot installed: ").append(join(missing));
+        if (refreshing) fb.append("\nRefreshing\u2026");
+        if (vRailFoot != null) vRailFoot.setText(fb.toString());
+
+        selectSheet(sel, false);
+        focusRail();
+    }
+
+    /**
+     * A service tile: a wide wordmark in the brand's own colour, with the count, or
+     * "Not installed · install" when the app is missing.
+     */
+    static View railTile(final Sheet sheet, final int index) {
+        LinearLayout tile = new LinearLayout(vCtx);
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setFocusable(true);
+        tile.setFocusableInTouchMode(true);
+        tile.setClickable(true);
+        tile.setPadding(12, 8, 10, 8);
+
+        TextView mark = new TextView(vCtx);
+        mark.setText(wordmark(sheet.key));
+        mark.setTextSize(17);
+        mark.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
+        mark.setLetterSpacing(0.02f);
+        mark.setSingleLine(true);
+        mark.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        mark.setTextColor(sheet.installed ? brand(sheet.key) : dim2());
+
+        // A real wordmark wins when one is supplied: drop assets/logos/<key>.png and the
+        // rail uses it with no code change, falling back to drawn type otherwise.
+        Bitmap logo = assetBitmap("logos/" + sheet.key.toLowerCase(java.util.Locale.US)
+                .replace(' ', '-') + ".png");
+        if (logo != null) {
+            ImageView img = new ImageView(vCtx);
+            img.setImageBitmap(logo);
+            img.setAdjustViewBounds(true);
+            img.setScaleType(ImageView.ScaleType.FIT_START);
+            if (!sheet.installed) img.setAlpha(0.55f);
+            tile.addView(img, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT, dp(30)));
+        } else {
+            tile.addView(mark, new LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        }
+
+        TextView count = new TextView(vCtx);
+        count.setText(sheet.installed
+                ? plural(sheet.rows.size(), sheet.curated ? "pick" : "title")
+                : "Not installed  \u00B7  install");
+        count.setTextSize(11);
+        count.setTextColor(sheet.installed ? dim2() : accent());
+        count.setPadding(0, 1, 0, 0);
+        tile.addView(count);
+
+        if (!sheet.installed) tile.setAlpha(0.72f);
+
+        tile.setOnClickListener(new View.OnClickListener() {
+            public void onClick(View v) {
+                selectSheet(index, true);
+            }
+        });
+        tile.setOnKeyListener(new View.OnKeyListener() {
+            public boolean onKey(View v, int code, KeyEvent e) {
+                if (e.getAction() != KeyEvent.ACTION_UP) return false;
+                if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                    selectSheet(index, true);
+                    return true;
+                }
+                return false;
+            }
+        });
+        tile.setOnFocusChangeListener(new View.OnFocusChangeListener() {
+            public void onFocusChange(View v, boolean has) {
+                v.setAlpha(1f);
+                if (!has && !sheet.installed) v.setAlpha(0.72f);
+                v.setBackground(has ? rounded(rowTintSel(), 14, accent())
+                                    : rounded(0, 14, 0));
+                if (has && index != vSheetIndex) selectSheet(index, false);
+            }
+        });
+        vRailViews.add(tile);
+        return tile;
+    }
+
+    /** Load one service's page into the right pane. */
+    static void selectSheet(int index, boolean focusPane) {
+        if (index < 0 || index >= vSheets.size()) return;
+        vSheetIndex = index;
+        Sheet sheet = vSheets.get(index);
+        vCtx.getSharedPreferences("xray", Context.MODE_PRIVATE).edit()
+                .putString("theseSheet", sheet.key).apply();
+
+        vTheseList.removeAllViews();
+        vTopRow = null;
+        vPaneTitle.setText(sheet.title.toUpperCase(java.util.Locale.US)
+                + (sheet.installed ? "  \u00B7  " + sheet.rows.size()
+                        + (sheet.curated ? " PICKS" : " TITLES")
+                        : "  \u00B7  NOT INSTALLED"));
+
+        vRowSink = vTheseList;
+        vRowScroll = vTheseScroll;
+        vInstallMode = !sheet.installed;
+        try {
+            for (int i = 0; i < sheet.rows.size(); i++) {
+                if (sheet.curated) addPickSeason(sheet.rows.get(i));
+                else addPick(i + 1, sheet.rows.get(i));
+            }
+            if (!sheet.installed) {
+                TextView hint = new TextView(vCtx);
+                hint.setText("OK opens the Play Store for " + sheet.title
+                        + ". Install it, then reopen this tab.");
+                hint.setTextSize(12);
+                hint.setTextColor(dim2());
+                hint.setLineSpacing(0, 1.12f);
+                hint.setPadding(6, 12, 6, 0);
+                vTheseList.addView(hint);
+            }
+        } finally {
+            vRowSink = null;
+            vRowScroll = null;
+            vInstallMode = false;
+        }
+        vTheseScroll.scrollTo(0, 0);
+
+        if (focusPane) {
+            for (int i = 0; i < vTheseList.getChildCount(); i++) {
+                View child = vTheseList.getChildAt(i);
+                if (child.isFocusable()) {
+                    child.requestFocus();
+                    return;
+                }
+            }
+        }
+    }
+
+    /** "1 title" / "6 titles": the rail showed "1 titles" and it read like a bug. */
+    static String plural(int n, String one) {
+        return n + " " + one + (n == 1 ? "" : "s");
+    }
+
+    static void focusRail() {
+        if (vSheetIndex >= 0 && vSheetIndex < vRailViews.size()) {
+            vRailViews.get(vSheetIndex).requestFocus();
+        } else if (!vRailViews.isEmpty()) {
+            vRailViews.get(0).requestFocus();
+        }
+    }
+
+    /**
+     * Wordmark for the rail, drawn as type in the service's own colour.
+     *
+     * Real logos would have to be bundled assets: there is no reliable, licence-clean
+     * source a TV can fetch at runtime, and a scraped mark that changes shape is worse
+     * than a clean wordmark. If an official PNG is dropped into assets/logos/<key>.png
+     * the loader picks it up instead, with no code change.
+     */
+    static String wordmark(String key) {
+        if ("JIOHOTSTAR".equals(key)) return "JioHotstar";
+        if ("NETFLIX".equals(key)) return "NETFLIX";
+        if ("PRIME VIDEO".equals(key)) return "prime video";
+        if ("ZEE5".equals(key)) return "ZEE5";
+        if ("SONYLIV".equals(key)) return "SonyLIV";
+        if ("MX PLAYER".equals(key)) return "MX Player";
+        if ("APPLE TV".equals(key)) return "Apple TV";
+        if ("HOICHOI".equals(key)) return "hoichoi";
+        if ("CRUNCHYROLL".equals(key)) return "Crunchyroll";
+        return "New seasons";
+    }
+
+    /** Brand colour for the tile. */
+    static int brand(String key) {
+        if ("JIOHOTSTAR".equals(key)) return 0xFF3EA6FF;
+        if ("NETFLIX".equals(key)) return 0xFFE50914;
+        if ("PRIME VIDEO".equals(key)) return 0xFF00A8E1;
+        if ("ZEE5".equals(key)) return 0xFF9B4DE0;
+        if ("SONYLIV".equals(key)) return 0xFFFF5A36;
+        if ("MX PLAYER".equals(key)) return 0xFFF26522;
+        if ("APPLE TV".equals(key)) return 0xFFB9B9BE;
+        if ("HOICHOI".equals(key)) return 0xFFE8003F;
+        if ("CRUNCHYROLL".equals(key)) return 0xFFF47521;
+        return light() ? 0xFFB8860B : 0xFFFFC857;
     }
 
     /** The app packages that can play a service, from WatchThese.PROVIDERS. */
@@ -2563,14 +2832,30 @@ public class OverlayController {
         return new String[0];
     }
 
-    /** True when this TV can actually open the service (phone and TV apps both count). */
+    /**
+     * True when this TV can actually open the service.
+     *
+     * Package existence is not enough: this Mi TV ships empty preloads for SonyLIV
+     * (enabled, no activity) and MX Player (disabled), and both looked installed. A
+     * launcher intent is the honest test - it is what "I can open it" means.
+     */
     static boolean appInstalled(String provider) {
         String[] pkgs = packagesFor(provider);
         if (pkgs.length == 0) return true;      // nothing to check: assume it can open
         for (String pkg : pkgs) {
-            if (installed(pkg)) return true;
+            if (canLaunch(pkg)) return true;
         }
         return false;
+    }
+
+    static boolean canLaunch(String pkg) {
+        try {
+            android.content.pm.PackageManager pm = vCtx.getPackageManager();
+            return pm.getLeanbackLaunchIntentForPackage(pkg) != null
+                    || pm.getLaunchIntentForPackage(pkg) != null;
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /** "PRIME VIDEO" -> "Prime Video"; section headers need the readable form. */
@@ -2595,30 +2880,6 @@ public class OverlayController {
         return sb.toString();
     }
 
-    /**
-     * One section per service, heading plus its rows. Returns the first row added, so
-     * the caller can put the cursor there; null when nothing was drawn.
-     */
-    static View addSections(java.util.Map<String, List<WatchThese.Pick>> byProvider,
-                            boolean onlyInstalled, List<String> missing) {
-        View first = null;
-        for (String[] prov : WatchThese.PROVIDERS) {
-            List<WatchThese.Pick> rows = byProvider.get(prov[1]);
-            if (rows == null || rows.isEmpty()) continue;
-            if (onlyInstalled && !appInstalled(prov[1])) {
-                if (missing != null) missing.add(pretty(prov[1]));
-                continue;
-            }
-            vList.addView(header("ON "
-                    + pretty(prov[1]).toUpperCase(java.util.Locale.US)));
-            for (int i = 0; i < rows.size(); i++) {
-                View r = addPick(i + 1, rows.get(i));
-                if (first == null) first = r;
-            }
-        }
-        return first;
-    }
-
     static View addPick(final int rank, final WatchThese.Pick p) {
         return addPickRow(String.format(java.util.Locale.US, "%02d", rank),
                 rank <= 3 ? (light() ? 0xFFB8860B : 0xFFFFC857) : dim2(), 22, p);
@@ -2632,6 +2893,10 @@ public class OverlayController {
 
     static View addPickRow(final String lead, final int leadColor, final int leadSize,
                            final WatchThese.Pick p) {
+        // Captured now: the sink is only set while the pane is being filled, but the
+        // key listeners below run long after that.
+        final boolean inPane = vRowSink == vTheseList;
+
         LinearLayout row = new LinearLayout(vCtx);
         row.setOrientation(LinearLayout.HORIZONTAL);
         row.setGravity(Gravity.CENTER_VERTICAL);
@@ -2644,8 +2909,9 @@ public class OverlayController {
                 // first, so the top row would already have lost focus by the UP.
                 if (code == KeyEvent.KEYCODE_DPAD_UP && v == vTopRow
                         && e.getAction() == KeyEvent.ACTION_DOWN) {
-                    // Sort icons first: they sit above this row and have no other route.
-                    focusSort();
+                    // In the pane there is nothing above but the service rail.
+                    if (inPane) focusRail();
+                    else focusSort();   // sort icons have no other route
                     return true;
                 }
                 if (e.getAction() != KeyEvent.ACTION_UP) return false;
@@ -2654,7 +2920,8 @@ public class OverlayController {
                     return true;
                 }
                 if (code == KeyEvent.KEYCODE_DPAD_LEFT) {
-                    openMenu();
+                    if (inPane) focusRail();
+                    else openMenu();
                     return true;
                 }
                 return false;
@@ -2740,19 +3007,25 @@ public class OverlayController {
         rail.addView(score);
 
         final TextView watch = new TextView(vCtx);
-        watch.setText("\u25B6  " + p.provider);
+        watch.setText(vInstallMode ? "INSTALL  \u25B8" : "\u25B6  " + p.provider);
         watch.setTextSize(11);
         watch.setLetterSpacing(0.10f);
         watch.setTypeface(Typeface.DEFAULT_BOLD);
-        watch.setTextColor(accent());
+        watch.setTextColor(vInstallMode ? (light() ? 0xFFB8860B : 0xFFFFC857) : accent());
         watch.setGravity(Gravity.END);
         watch.setPadding(0, 9, 0, 0);
         rail.addView(watch);
 
         row.addView(rail);
+        if (vInstallMode) row.setAlpha(0.8f);
 
         row.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
+                if (vInstallMode) {
+                    Log.i(TAG, "install prompt: " + p.provider);
+                    if (openStore(p.provider)) dismiss(false);
+                    return;
+                }
                 Log.i(TAG, "watch these: " + p.title + " on " + p.provider);
                 if (openShow(p.url, p.provider)) dismiss(false);
             }
@@ -2765,13 +3038,15 @@ public class OverlayController {
                 if (!has) return;
                 // Same rule as the watching rows: jump only when the row is not
                 // already fully on screen, so focus never shakes the list.
+                ScrollView sc = inPane ? vTheseScroll : vScroll;
+                if (sc == null) return;
                 int top = v.getTop(), bottom = v.getBottom();
-                int viewTop = vScroll.getScrollY();
+                int viewTop = sc.getScrollY();
                 int visibleTop = top - viewTop;
                 int visibleBottom = bottom - viewTop;
-                if (visibleTop < 8 || visibleBottom > vScroll.getHeight() - 8) {
-                    int target = Math.max(0, top - vScroll.getHeight() / 2 + v.getHeight() / 2);
-                    vScroll.scrollTo(0, target);
+                if (visibleTop < 8 || visibleBottom > sc.getHeight() - 8) {
+                    int target = Math.max(0, top - sc.getHeight() / 2 + v.getHeight() / 2);
+                    sc.scrollTo(0, target);
                 }
             }
         });
@@ -2779,7 +3054,7 @@ public class OverlayController {
         LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         rlp.bottomMargin = 18;
-        vList.addView(row, rlp);
+        ((ViewGroup) (inPane ? vTheseList : vList)).addView(row, rlp);
         ROWS.add(row);
         if (vTopRow == null) vTopRow = row;
         return row;
@@ -2792,6 +3067,34 @@ public class OverlayController {
                 if (root != null && tab == TAB_THESE) buildTab();
             }
         });
+    }
+
+    /** Open the Play Store listing for a service, so a missing app is one press away. */
+    static boolean openStore(String provider) {
+        String[] pkgs = packagesFor(provider);
+        if (pkgs.length == 0) return false;
+        String id = pkgs[0];
+        try {
+            android.content.Intent i = new android.content.Intent(
+                    android.content.Intent.ACTION_VIEW,
+                    Uri.parse("market://details?id=" + id));
+            i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+            vCtx.startActivity(i);
+            return true;
+        } catch (Exception e) {
+            try {
+                android.content.Intent i = new android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        Uri.parse("https://play.google.com/store/apps/details?id=" + id));
+                i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
+                vCtx.startActivity(i);
+                return true;
+            } catch (Exception e2) {
+                Log.w(TAG, "store: " + e2);
+                notice("No app store on this TV to install " + pretty(provider) + ".");
+                return false;
+            }
+        }
     }
 
     /** Open a JioHotstar show page; the system routes hotstar.com to the app. */

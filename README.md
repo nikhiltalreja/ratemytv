@@ -18,9 +18,10 @@ YouTube, Netflix, Prime, Apple TV and SonyLIV work too, where their own data all
 and the section below says exactly where that stops.
 
 Then it goes one step ahead of X-Ray. **Watch These** is a rolling list of the
-best-rated shows that are actually streaming on JioHotstar, rebuilt from the ratings
-catalogue and the JioHotstar index every 12 hours. OK on a pick opens the title in the
-app, with no search.
+best-rated shows streaming on the services installed on this TV — JioHotstar, Netflix,
+Prime Video, ZEE5, SonyLIV, MX Player, Apple TV, Hoichoi and Crunchyroll, one section
+per installed app. It is rebuilt from the ratings catalogue every 12 hours. OK on a
+pick opens the title in its app, with no search.
 
 <p align="center">
   <a href="#what-it-does">What it does</a> ·
@@ -37,8 +38,9 @@ app, with no search.
 
 - **Ratings on demand.** IMDb score and votes, Rotten Tomatoes, plot, cast and year —
   for a JioHotstar title, in about a second.
-- **One step ahead of X-Ray.** **Watch These** lists the best-rated shows streaming on
-  JioHotstar right now, refreshed every 12 hours. OK opens the title in the app.
+- **One step ahead of X-Ray.** **Watch These** lists the best-rated 2026 shows across
+  the nine services it covers, one section per installed app, refreshed every 12 hours.
+  OK opens the title in its app.
 - **Continue watching.** One list from this TV's own playback record, across apps,
   with progress and elapsed time.
 - **Instant switching** (`ALT+TAB` on a keyboard, `RESUME` on a remote). Jump from one
@@ -221,8 +223,9 @@ from another app, and stats is the `STATS` tab.
 ## Using the card
 
 `WATCHING` lists titles this TV has played. `WATCH THESE` lists 2026 series above
-7.0 on IMDb that are on JioHotstar. `STATS` summarises the month. `SETTINGS` holds the
-OMDb key, the theme, and the version (with the update state).
+7.0 on IMDb across the nine services it covers, one section per installed app. `STATS`
+summarises the month. `SETTINGS` holds the OMDb key, the theme, and the version (with the
+update state).
 
 | Key | Action |
 |---|---|
@@ -254,34 +257,36 @@ playing the list is always by recency, with that title pinned first.
 
 ### Watch These
 
-Series that began in 2026, each above 7.0 on IMDb, each one available on
-JioHotstar. The list is **joined live on the TV**, from two public sources:
+Series that began in 2026, each above 7.0 on IMDb, on any of **nine services**: JioHotstar,
+Netflix, Prime Video, ZEE5, SonyLIV, MX Player, Apple TV, Hoichoi and Crunchyroll. The list
+is fetched live on the TV from one public, keyless ratings catalogue the card also uses to
+fill scores OMDb lacks. Three requests of 100 shows each carry title, year, three genres,
+the IMDb score and vote count, and the offers — which service carries it and its canonical
+URL. About **175 KB**, still with no poster, plot or cast.
 
-- **The index** — JioHotstar's show sitemap (`id → slug`, 4 871 shows). The card already
-  fetches and caches it to name titles, so the panel reuses that map and adds no
-  traffic of its own.
-- **The scored list** — a public, keyless ratings catalogue the card also uses to fill
-  scores OMDb lacks. Three requests of 100 shows each, carrying only title, year, three
-  genres and the IMDb score and vote count — about **65 KB**, no poster, plot or cast.
+Each title is placed on the first service, in that order, that carries it, so nothing is
+listed twice. Rating must be strictly above 7.0 with at least 1 000 votes; the result is
+sorted by rating then votes and **capped at six per service** — Netflix alone had 36
+qualifying series, which is a catalogue, not a shortlist. 28 rows on the test TV.
 
-Titles are matched by normalised name (case, punctuation, `&`, leading article), the
-rating must be strictly above 7.0 with at least 1 000 votes, and the result is sorted
-by rating then votes. **Everything that qualifies is kept** (capped at 50, which the
-catalogue never reaches) and the list scrolls — 19 rows at the time of writing. The vote floor is
-what keeps a well-reviewed 507-vote documentary from outranking a 7 600-vote series on
-a 0.1 edge; the third page is what brings in titles like The Testaments, which sits
-around #200–300 of the 2026 popularity order.
+The panel draws one section per service — `ON JIOHOTSTAR`, `ON NETFLIX`, `ON PRIME VIDEO`,
+`ON ZEE5`, `ON SONY LIV`, `ON MX PLAYER`, `ON APPLE TV`, `ON HOICHOI`, `ON CRUNCHYROLL` —
+and skips a service whose app is not installed, naming it in a footnote instead
+("Not installed on this TV: ZEE5 and Hoichoi"). Install the app and its section appears
+on the next open.
 
-The joined list is cached for **12 hours**; after a failed fetch it backs off for 15
-minutes. The JioHotstar index behind it is cached for **24 hours**, so a series added
-to the catalogue today is linkable by tomorrow, and appears in the panel on the next
-12-hourly refresh. Opening the tab always paints the cached (or bundled) list first, so
-nothing waits on the network, and the panel repaints itself when a refresh lands. On the
-first run offline it falls back to five saved picks, labelled as such.
+Not listed, because the ratings catalogue carries no offers for them in this market, so
+there is nothing to join against: **Aha, Sun NXT, ETV Win, ManoramaMAX**. Amazon and Apple
+reseller packages ("Prime Video with Ads", "SonyLIV Amazon Channel") are ignored on
+purpose — they are the same catalogue through a middleman.
 
-The top of the list, as this was written, was: A Knight of the Seven Kingdoms, Dutton
-Ranch, The Testaments, Scrubs, VisionQuest — but the app no longer depends on that
-being true.
+Because the offers carry the link, the panel no longer needs the JioHotstar sitemap: that
+624 KB download is gone from this feature, and so is its 24-hour lag.
+
+The list is cached for **12 hours**; after a failed fetch it backs off for 15 minutes.
+Opening the tab always paints the cached (or bundled) list first, so nothing waits on the
+network, and the panel repaints itself when a refresh lands. On the first run offline it
+falls back to five saved picks, labelled as such.
 
 ### New seasons, by hand
 

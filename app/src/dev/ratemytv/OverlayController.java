@@ -755,6 +755,11 @@ public class OverlayController {
         holders.clear();
         ROWS.clear();
         vTopRow = null;
+        // Nothing is on screen any more, so nothing can be "already shown". Leaving
+        // these set made the next card compare its rows with the previous card's and
+        // skip drawing entirely: a blank list with the data sitting right there.
+        shownCont = null;
+        shownFresh = null;
     }
 
     /**
@@ -911,9 +916,10 @@ public class OverlayController {
         // after the post (rating mode with scores still arriving), so iterate copies.
         List<Watcher.Item> cont = new ArrayList<>(contIn);
         List<Watcher.Item> fresh = new ArrayList<>(freshIn);
+        clearList();
+        // After clearList: it resets this bookkeeping, so setting it first was a no-op.
         shownCont = cont;
         shownFresh = fresh;
-        clearList();
         renderNow();
         // A title shown in continue does not belong again under new/saved.
         // The live title goes first even if its timestamp has not caught up yet.
@@ -2473,31 +2479,55 @@ public class OverlayController {
         vList.addView(headRow);
 
         TextView intro = new TextView(vCtx);
-        boolean jio = installed("in.startv.hotstar");
+        boolean anyInstalled = false;
+        for (String[] prov : WatchThese.PROVIDERS) {
+            if (appInstalled(prov[1])) anyInstalled = true;
+        }
         intro.setText("Series that started in 2026, above "
                 + String.format(java.util.Locale.US, "%.1f", WatchThese.MIN_RATING)
-                + (jio ? " on IMDb, streaming on JioHotstar. OK opens one."
-                       : " on IMDb, streaming on JioHotstar.\nJioHotstar is not installed "
-                               + "on this TV, so these cannot be opened from here."));
+                + " on IMDb, on the services installed on this TV. OK opens one.");
         intro.setTextSize(13);
-        intro.setTextColor(jio ? dim() : 0xFFFFC857);
+        intro.setTextColor(dim());
         intro.setLineSpacing(0, 1.12f);
         intro.setPadding(6, 0, 6, 8);
         vList.addView(intro);
 
         if (refreshing) {
             TextView wait = new TextView(vCtx);
-            wait.setText(live ? "Refreshing titles and scores\u2026"
-                    : "Fetching JioHotstar's index and IMDb scores\u2026");
+            wait.setText(live ? "Refreshing titles, scores and availability\u2026"
+                    : "Fetching scores and where each title streams\u2026");
             wait.setTextSize(12);
             wait.setTextColor(dim2());
             wait.setPadding(6, 0, 6, 6);
             vList.addView(wait);
         }
 
-        int firstLiveRow = vList.getChildCount();
-        for (int i = 0; i < picks.size(); i++) {
-            addPick(i + 1, picks.get(i));
+        // One section per service, in the app's order. A service whose app is not on
+        // this TV is skipped, because its rows could not be opened; when nothing at
+        // all is installed the sections are drawn anyway, so the panel is never empty.
+        java.util.LinkedHashMap<String, List<WatchThese.Pick>> byProvider =
+                new java.util.LinkedHashMap<String, List<WatchThese.Pick>>();
+        for (String[] prov : WatchThese.PROVIDERS) {
+            byProvider.put(prov[1], new ArrayList<WatchThese.Pick>());
+        }
+        for (WatchThese.Pick p : picks) {
+            List<WatchThese.Pick> bucket = byProvider.get(p.provider);
+            if (bucket != null) bucket.add(p);
+        }
+
+        List<String> missing = new ArrayList<String>();
+        View firstRow = addSections(byProvider, anyInstalled, missing);
+        if (firstRow == null) {
+            missing.clear();
+            firstRow = addSections(byProvider, false, missing);
+        }
+        if (!missing.isEmpty()) {
+            TextView note = new TextView(vCtx);
+            note.setText("Not installed on this TV: " + join(missing) + ".");
+            note.setTextSize(12);
+            note.setTextColor(dim2());
+            note.setPadding(6, 10, 6, 4);
+            vList.addView(note);
         }
 
         // Returning shows, hand-checked: the live join above cannot see them, because
@@ -2520,23 +2550,87 @@ public class OverlayController {
         }
 
         maybeScrollTop();
-        if (firstLiveRow > 0 && firstLiveRow < vList.getChildCount()) {
-            vList.getChildAt(firstLiveRow).requestFocus();
-        }
+        if (firstRow != null) firstRow.requestFocus();
     }
 
-    static void addPick(final int rank, final WatchThese.Pick p) {
-        addPickRow(String.format(java.util.Locale.US, "%02d", rank),
+    /** The app packages that can play a service, from WatchThese.PROVIDERS. */
+    static String[] packagesFor(String provider) {
+        for (String[] prov : WatchThese.PROVIDERS) {
+            if (prov[1].equals(provider)) {
+                return prov[2].isEmpty() ? new String[0] : prov[2].split("\\|");
+            }
+        }
+        return new String[0];
+    }
+
+    /** True when this TV can actually open the service (phone and TV apps both count). */
+    static boolean appInstalled(String provider) {
+        String[] pkgs = packagesFor(provider);
+        if (pkgs.length == 0) return true;      // nothing to check: assume it can open
+        for (String pkg : pkgs) {
+            if (installed(pkg)) return true;
+        }
+        return false;
+    }
+
+    /** "PRIME VIDEO" -> "Prime Video"; section headers need the readable form. */
+    static String pretty(String provider) {
+        if ("PRIME VIDEO".equals(provider)) return "Prime Video";
+        if ("APPLE TV".equals(provider)) return "Apple TV";
+        if ("NETFLIX".equals(provider)) return "Netflix";
+        if ("ZEE5".equals(provider)) return "ZEE5";
+        if ("SONYLIV".equals(provider)) return "SonyLIV";
+        if ("MX PLAYER".equals(provider)) return "MX Player";
+        if ("HOICHOI".equals(provider)) return "Hoichoi";
+        if ("CRUNCHYROLL".equals(provider)) return "Crunchyroll";
+        return "JioHotstar";
+    }
+
+    static String join(List<String> parts) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < parts.size(); i++) {
+            if (i > 0) sb.append(i == parts.size() - 1 ? " and " : ", ");
+            sb.append(parts.get(i));
+        }
+        return sb.toString();
+    }
+
+    /**
+     * One section per service, heading plus its rows. Returns the first row added, so
+     * the caller can put the cursor there; null when nothing was drawn.
+     */
+    static View addSections(java.util.Map<String, List<WatchThese.Pick>> byProvider,
+                            boolean onlyInstalled, List<String> missing) {
+        View first = null;
+        for (String[] prov : WatchThese.PROVIDERS) {
+            List<WatchThese.Pick> rows = byProvider.get(prov[1]);
+            if (rows == null || rows.isEmpty()) continue;
+            if (onlyInstalled && !appInstalled(prov[1])) {
+                if (missing != null) missing.add(pretty(prov[1]));
+                continue;
+            }
+            vList.addView(header("ON "
+                    + pretty(prov[1]).toUpperCase(java.util.Locale.US)));
+            for (int i = 0; i < rows.size(); i++) {
+                View r = addPick(i + 1, rows.get(i));
+                if (first == null) first = r;
+            }
+        }
+        return first;
+    }
+
+    static View addPick(final int rank, final WatchThese.Pick p) {
+        return addPickRow(String.format(java.util.Locale.US, "%02d", rank),
                 rank <= 3 ? (light() ? 0xFFB8860B : 0xFFFFC857) : dim2(), 22, p);
     }
 
-    static void addPickSeason(final WatchThese.Pick p) {
+    static View addPickSeason(final WatchThese.Pick p) {
         // "S3" in the numeral slot: same row, different claim — this show did not
         // start this year, its new season did.
-        addPickRow("S" + p.season, accent(), 16, p);
+        return addPickRow("S" + p.season, accent(), 16, p);
     }
 
-    static void addPickRow(final String lead, final int leadColor, final int leadSize,
+    static View addPickRow(final String lead, final int leadColor, final int leadSize,
                            final WatchThese.Pick p) {
         LinearLayout row = new LinearLayout(vCtx);
         row.setOrientation(LinearLayout.HORIZONTAL);
@@ -2646,7 +2740,7 @@ public class OverlayController {
         rail.addView(score);
 
         final TextView watch = new TextView(vCtx);
-        watch.setText("\u25B6  JIOHOTSTAR");
+        watch.setText("\u25B6  " + p.provider);
         watch.setTextSize(11);
         watch.setLetterSpacing(0.10f);
         watch.setTypeface(Typeface.DEFAULT_BOLD);
@@ -2659,8 +2753,8 @@ public class OverlayController {
 
         row.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
-                Log.i(TAG, "watch these: " + p.title);
-                if (openShow(p.url)) dismiss(false);
+                Log.i(TAG, "watch these: " + p.title + " on " + p.provider);
+                if (openShow(p.url, p.provider)) dismiss(false);
             }
         });
         row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
@@ -2688,6 +2782,7 @@ public class OverlayController {
         vList.addView(row, rlp);
         ROWS.add(row);
         if (vTopRow == null) vTopRow = row;
+        return row;
     }
 
     /** A live refresh landed; repaint the panel if it is the one on screen. */
@@ -2700,12 +2795,19 @@ public class OverlayController {
     }
 
     /** Open a JioHotstar show page; the system routes hotstar.com to the app. */
-    static boolean openShow(String url) {
-        // Every Watch These pick is a JioHotstar show page. Without the app the link
-        // falls to a browser, which then asks you to sign in to a site - say what
-        // happened instead of pretending it opened.
-        if (!installed("in.startv.hotstar")) {
-            notice("JioHotstar is not installed on this TV.");
+    static boolean openShow(String url, String provider) {
+        // Without the app the link falls to a browser, which then asks you to sign in
+        // to a site - say what happened instead of pretending it opened.
+        String pkg = null;
+        String[] pkgs = packagesFor(provider);
+        for (String candidate : pkgs) {
+            if (installed(candidate)) {
+                pkg = candidate;
+                break;
+            }
+        }
+        if (pkgs.length > 0 && pkg == null) {
+            notice(pretty(provider) + " is not installed on this TV.");
             return false;
         }
         try {
@@ -2716,7 +2818,7 @@ public class OverlayController {
             return true;
         } catch (Exception e) {
             Log.w(TAG, "open show: " + e);
-            notice("Could not open JioHotstar for this title.");
+            notice("Could not open " + pretty(provider) + " for this title.");
             return false;
         }
     }
@@ -3852,8 +3954,10 @@ public class OverlayController {
         if (pkg == null || pkg.isEmpty()) return false;
         try {
             android.content.pm.PackageManager pm = vCtx.getPackageManager();
-            return pm.getLeanbackLaunchIntentForPackage(pkg) != null
-                    || pm.getLaunchIntentForPackage(pkg) != null;
+            // Package existence first: MX Player's TV build is installed but exposes no
+            // launcher intent this API can see, which made the panel call it missing.
+            pm.getPackageInfo(pkg, 0);
+            return true;
         } catch (Exception e) {
             return false;
         }

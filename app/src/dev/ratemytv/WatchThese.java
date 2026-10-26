@@ -48,18 +48,19 @@ public class WatchThese {
     static final String ENDPOINT = "https://apis.justwatch.com/graphql";
     static final String PREFS = "watchthese";
     /** Bump when the join rules change, so an old list cannot outlive them. */
-    static final String V = "4";
+    static final String V = "6";
     static final String KEY = "list" + V;
     static final String STAMP = "at" + V;
     static final String RETRY = "retryAt" + V;
 
     /**
-     * Everything that qualifies is kept, not a top five: the fetch already paid for
-     * the whole page, and a fifteen-row shelf is more useful than a five-row one. The
-     * cap only bounds the prefs blob (a row is ~120 bytes; the catalogue tops out
-     * around 20 at these thresholds).
+     * No single service may flood the shelf: Netflix alone had 36 qualifying series,
+     * which is a catalogue, not a shortlist. Six per service keeps nine services
+     * browsable.
      */
-    static final int MAX_ROWS = 50;
+    static final int PER_PROVIDER = 6;
+    /** Hard bound on the prefs blob (nine services, with slack). */
+    static final int MAX_ROWS = 80;
     /** "Above 7.0 stars", strictly: a 7.0 exactly would be a coin flip. */
     static final double MIN_RATING = 7.0;
     /**
@@ -71,17 +72,43 @@ public class WatchThese {
     /** After a failed fetch, wait this long before trying again. */
     static final long RETRY_MS = 15L * 60 * 1000;
 
+    /**
+     * The services the panel lists, in display order: the global ones first, then what
+     * India actually watches. Columns are JustWatch's package name, the panel's label,
+     * and the app packages that play it ("|" when the phone and TV apps differ).
+     *
+     * JustWatch's reseller packages ("Amazon Prime Video with Ads", "SonyLIV Amazon
+     * Channel", "Apple TV Amazon Channel") are deliberately absent: they are the same
+     * catalogue reached through Amazon, not a separate place to watch.
+     *
+     * Aha, Sun NXT, ETV Win and ManoramaMAX are not listed because JustWatch carries no
+     * offers for them in this catalogue — there is nothing to join against.
+     */
+    static final String[][] PROVIDERS = {
+            {"JioHotstar", "JIOHOTSTAR", "in.startv.hotstar"},
+            {"Netflix", "NETFLIX", "com.netflix.ninja"},
+            {"Amazon Prime Video", "PRIME VIDEO", "com.amazon.amazonvideo.livingroom"},
+            {"Zee5", "ZEE5", "com.zee5.hipi"},
+            {"Sony Liv", "SONYLIV", "com.sonyliv"},
+            {"Amazon MX Player", "MX PLAYER", "com.mxtech.videoplayer.television|com.mxtech.videoplayer.ad"},
+            {"Apple TV", "APPLE TV", "com.apple.atve.androidtv.appletv"},
+            {"Hoichoi", "HOICHOI", "com.hoichoi"},
+            {"Crunchyroll", "CRUNCHYROLL", "com.crunchyroll.crunchyroid"},
+    };
+
     static final String QUERY =
             "query S($country: Country!, $language: Language!, $offset: Int!) {"
             + " popularTitles(country: $country, first: 100, offset: $offset,"
             + " filter: {objectTypes: [SHOW], releaseYear: {min: 2026, max: 2026}}) {"
             + " edges { node { content(country: $country, language: $language) {"
             + " title originalReleaseYear genres { translation(language: $language) }"
-            + " scoring { imdbScore imdbVotes } } } } } }";
+            + " scoring { imdbScore imdbVotes } }"
+            + " offers(country: $country, platform: WEB) {"
+            + " package { clearName } standardWebURL } } } } }";
 
     /**
      * Pages of 100 to ask for. The Testaments sits around #200-300 of the 2026
-     * popularity order, so two pages missed it; three cost about 65 KB and catch it.
+     * popularity order, so two pages missed it; three cover it.
      */
     static final int PAGES = 3;
 
@@ -95,20 +122,24 @@ public class WatchThese {
         final int year;
         /** 0 for a series that started in 2026; >0 for a returning show's new season. */
         final int season;
+        /** Display name of the service, from {@link #PROVIDERS}. */
+        final String provider;
         final String url;
 
-        Pick(String title, String imdb, long votes, String genres, int year, String url) {
-            this(title, imdb, votes, genres, year, 0, url);
+        Pick(String title, String imdb, long votes, String genres, int year,
+             String provider, String url) {
+            this(title, imdb, votes, genres, year, 0, provider, url);
         }
 
         Pick(String title, String imdb, long votes, String genres, int year, int season,
-             String url) {
+             String provider, String url) {
             this.title = title;
             this.imdb = imdb;
             this.votes = votes;
             this.genres = genres;
             this.year = year;
             this.season = season;
+            this.provider = provider;
             this.url = url;
         }
 
@@ -147,6 +178,7 @@ public class WatchThese {
                 o.put("v", p.votes);
                 o.put("g", p.genres);
                 o.put("y", p.year);
+                o.put("p", p.provider);
                 o.put("u", p.url);
                 arr.put(o);
             } catch (Exception ignored) {
@@ -168,7 +200,8 @@ public class WatchThese {
             String u = o.optString("u", "");
             if (t.isEmpty() || u.isEmpty()) continue;
             out.add(new Pick(t, o.optString("r", "?"), o.optLong("v", 0),
-                    o.optString("g", ""), o.optInt("y", 2026), u));
+                    o.optString("g", ""), o.optInt("y", 2026),
+                    o.optString("p", "JIOHOTSTAR"), u));
         }
         return out;
     }
@@ -212,38 +245,24 @@ public class WatchThese {
         }).start();
     }
 
-    /** The live join. Null when nothing usable came back. */
+    /**
+     * The live join. Null when nothing usable came back.
+     *
+     * No sitemap any more: each title's offers say which service carries it and give
+     * the canonical link, so the panel covers four catalogues with one source and no
+     * 624 KB download. It also removes the index's 24-hour lag.
+     */
     static List<Pick> fetch(Context c) {
-        JSONObject index = Sitemap.map(c);
-        if (index.length() < 200) {
-            // First run: the sitemap has not landed yet. Fetch it here rather than
-            // draw an empty panel; 624 KB, once, and Sitemap.refresh() will cache it.
-            Log.i(TAG, "index empty; fetching sitemap");
-            index = Sitemap.parse(c, Sitemap.DEFAULT_SHOWS);
-        }
-        if (index == null || index.length() < 200) return null;
-        Log.i(TAG, "index " + index.length() + " shows");
-
-        Map<String, String[]> byTitle = new HashMap<String, String[]>();
-        Iterator<String> ids = index.keys();
-        while (ids.hasNext()) {
-            String id = ids.next();
-            String slug = index.optString(id, "");
-            String name = Sitemap.title(slug);
-            if (name == null) continue;
-            byTitle.put(norm(name), new String[]{slug, id});
-        }
-
         List<Pick> all = new ArrayList<Pick>();
         boolean any = false;
         for (int page = 0; page < PAGES; page++) {
             String body = post(page * 100);
             if (body == null) continue;
             any = true;
-            collect(body, byTitle, all);
+            collect(body, all);
         }
         if (!any) return null;
-        Log.i(TAG, "matched " + all.size() + " rated shows on JioHotstar");
+        Log.i(TAG, "matched " + all.size() + " rated shows with an offer");
 
         Collections.sort(all, new Comparator<Pick>() {
             public int compare(Pick a, Pick b) {
@@ -252,11 +271,22 @@ public class WatchThese {
                 return Long.compare(b.votes, a.votes);
             }
         });
-        return all.size() > MAX_ROWS ? new ArrayList<Pick>(all.subList(0, MAX_ROWS)) : all;
+
+        // Cap per service, keeping the rating order within each.
+        List<Pick> out = new ArrayList<Pick>();
+        int[] taken = new int[PROVIDERS.length];
+        for (int i = 0; i < all.size() && out.size() < MAX_ROWS; i++) {
+            Pick p = all.get(i);
+            int idx = providerIndex(p.provider);
+            if (idx < 0 || taken[idx] >= PER_PROVIDER) continue;
+            taken[idx]++;
+            out.add(p);
+        }
+        return out;
     }
 
-    /** Read one page, keep what is rated and present on JioHotstar. */
-    static void collect(String body, Map<String, String[]> byTitle, List<Pick> out) {
+    /** Read one page, keep what is rated and carried by one of the four services. */
+    static void collect(String body, List<Pick> out) {
         try {
             JSONObject root = new JSONObject(body);
             JSONObject data = root.optJSONObject("data");
@@ -276,7 +306,7 @@ public class WatchThese {
             }
 
             for (int i = 0; i < edges.length(); i++) {
-                // edges[i] is {"node": {"content": ...}}; both levels are needed.
+                // edges[i] is {"node": {"content": ..., "offers": [...]}}.
                 JSONObject edge = edges.optJSONObject(i);
                 if (edge == null) continue;
                 JSONObject node = edge.optJSONObject("node");
@@ -293,25 +323,54 @@ public class WatchThese {
                 String title = content.optString("title", "");
                 if (title.isEmpty()) continue;
 
-                String[] hit = byTitle.get(norm(title));
-                if (hit == null) continue;
+                String[] offer = offerFor(node.optJSONArray("offers"));
+                if (offer == null) continue;
 
                 String genres = genres(content.optJSONArray("genres"));
-                String url = "https://www.hotstar.com/in/shows/" + hit[0] + "/" + hit[1];
                 boolean dup = false;
                 for (int j = 0; j < out.size(); j++) {
-                    if (out.get(j).url.equals(url)) {
+                    if (out.get(j).title.equalsIgnoreCase(title)) {
                         dup = true;
                         break;
                     }
                 }
                 if (dup) continue;
                 out.add(new Pick(title, String.format(Locale.US, "%.1f", rating), votes,
-                        genres, content.optInt("originalReleaseYear", 2026), url));
+                        genres, content.optInt("originalReleaseYear", 2026),
+                        offer[0], offer[1]));
             }
         } catch (Exception e) {
             Log.w(TAG, "collect: " + e);
         }
+    }
+
+    /**
+     * The best offer for one of our four services: {display name, watch URL}, or null.
+     * Priority is the order in PROVIDERS, so a title on both JioHotstar and Netflix is
+     * listed once, on the service this app is built for.
+     */
+    static String[] offerFor(JSONArray offers) {
+        if (offers == null) return null;
+        for (String[] prov : PROVIDERS) {
+            for (int i = 0; i < offers.length(); i++) {
+                JSONObject o = offers.optJSONObject(i);
+                if (o == null) continue;
+                JSONObject pkg = o.optJSONObject("package");
+                if (pkg == null) continue;
+                if (!prov[0].equalsIgnoreCase(pkg.optString("clearName", ""))) continue;
+                String url = o.optString("standardWebURL", "");
+                if (url.isEmpty()) continue;
+                return new String[]{prov[1], url};
+            }
+        }
+        return null;
+    }
+
+    static int providerIndex(String display) {
+        for (int i = 0; i < PROVIDERS.length; i++) {
+            if (PROVIDERS[i][1].equals(display)) return i;
+        }
+        return -1;
     }
 
     static String genres(JSONArray arr) {
@@ -403,19 +462,19 @@ public class WatchThese {
     static List<Pick> seed() {
         List<Pick> out = new ArrayList<Pick>();
         out.add(new Pick("A Knight of the Seven Kingdoms", "8.6", 289175,
-                "Adventure \u00B7 Drama \u00B7 Fantasy", 2026,
+                "Adventure \u00B7 Drama \u00B7 Fantasy", 2026, "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/a-knight-of-the-seven-kingdoms/1271461884"));
         out.add(new Pick("Star Wars: Maul - Shadow Lord", "8.5", 31215,
-                "Animation \u00B7 Action \u00B7 Adventure", 2026,
+                "Animation \u00B7 Action \u00B7 Adventure", 2026, "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/star-wars-maul-shadow-lord/1271515796"));
         out.add(new Pick("The Testaments", "8.2", 14269,
-                "Drama \u00B7 Thriller", 2026,
+                "Drama \u00B7 Thriller", 2026, "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/the-testaments/1271542058"));
         out.add(new Pick("Chiraiya", "8.0", 15254,
-                "Drama \u00B7 Hindi", 2026,
+                "Drama \u00B7 Hindi", 2026, "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/chiraiya/1271526656"));
         out.add(new Pick("Lanterns", "7.8", 65291,
-                "Action \u00B7 Crime \u00B7 Drama", 2026,
+                "Action \u00B7 Crime \u00B7 Drama", 2026, "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/lanterns/1271680756"));
         return out;
     }
@@ -440,17 +499,18 @@ public class WatchThese {
     static List<Pick> returning() {
         List<Pick> out = new ArrayList<Pick>();
         out.add(new Pick("The Bear", "8.5", 329129, "Comedy \u00B7 Drama", 2022, 5,
-                "https://www.hotstar.com/in/shows/the-bear/1260108974"));
+                "JIOHOTSTAR", "https://www.hotstar.com/in/shows/the-bear/1260108974"));
         out.add(new Pick("Jujutsu Kaisen", "8.5", 224926,
                 "Action & Adventure \u00B7 Animation \u00B7 Fantasy", 2020, 3,
-                "https://www.hotstar.com/in/shows/jujutsu-kaisen/1271461634"));
+                "JIOHOTSTAR", "https://www.hotstar.com/in/shows/jujutsu-kaisen/1271461634"));
         out.add(new Pick("MobLand", "8.3", 136487, "Crime \u00B7 Drama", 2025, 2,
-                "https://www.hotstar.com/in/shows/mobland/1271397631"));
+                "JIOHOTSTAR", "https://www.hotstar.com/in/shows/mobland/1271397631"));
         out.add(new Pick("House of the Dragon", "8.2", 576151,
                 "Action & Adventure \u00B7 Drama \u00B7 Fantasy", 2022, 3,
+                "JIOHOTSTAR",
                 "https://www.hotstar.com/in/shows/house-of-the-dragon/1971002877"));
         out.add(new Pick("Euphoria", "8.1", 327247, "Drama", 2019, 3,
-                "https://www.hotstar.com/in/shows/euphoria/1971002893"));
+                "JIOHOTSTAR", "https://www.hotstar.com/in/shows/euphoria/1971002893"));
         return out;
     }
 }

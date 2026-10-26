@@ -129,8 +129,7 @@ is paid, and is the one that explicitly supports the Netflix button on Xiaomi TV
 2. Add the remote button, set **Long press → Apps → Rate My TV**, and leave the single
    press alone.
 3. Its UI is made for phones, so the D-pad can be fiddly; a mouse helps. If the TV's
-   Play Store does not list it, the APK is on
-   [elementalx.org](https://elementalx.org/button-mapper/).
+   Play Store does not list it, use tvQuickActions Pro below.
 
 Launching an app is free; the paid Pro adds intents, scripts and themes.
 

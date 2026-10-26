@@ -28,7 +28,8 @@ slides in over it and the IMDb **8.5** score on The Bear's row pulses. 720×405,
 ## Watch These launch GIF
 
 `docs/demo-watch-these.gif` — the JioHotstar Watch These still; row 01 gets focus and a
-click, then cuts to the JioHotstar splash. 720×405, 42 frames, 5.0 s, 482 KB.
+click, then its wide key art and the JioHotstar splash. 720×405, 63 frames, 5.3 s,
+1.0 MB.
 
 The existing light still is the JioHotstar 2026 page, so the clicked row is *A Knight of
 the Seven Kingdoms*, not MobLand. MobLand lives under **New seasons**, which needs the TV

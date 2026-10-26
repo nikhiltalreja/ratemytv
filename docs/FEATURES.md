@@ -24,3 +24,12 @@ Watch These uses its own two-pane capture (`feature-watch-these.png`), not the R
 `docs/demo-overlay.gif` — a two-slide loop: the app canvas (JioHotstar, Netflix), then
 the card slides in over it with Mobland, and the IMDb **8.3** score pulses. 720×405,
 52 frames, 744 KB.
+
+## Watch These launch GIF
+
+`docs/demo-watch-these.gif` — the JioHotstar Watch These still; row 01 gets focus and a
+click, then cuts to the JioHotstar splash. 720×405, 42 frames, 482 KB.
+
+The existing light still is the JioHotstar 2026 page, so the clicked row is *A Knight of
+the Seven Kingdoms*, not MobLand. MobLand lives under **New seasons**, which needs the TV
+on to capture. The splash matches the service in the still.

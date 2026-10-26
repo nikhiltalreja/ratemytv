@@ -2473,11 +2473,14 @@ public class OverlayController {
         vList.addView(headRow);
 
         TextView intro = new TextView(vCtx);
+        boolean jio = installed("in.startv.hotstar");
         intro.setText("Series that started in 2026, above "
                 + String.format(java.util.Locale.US, "%.1f", WatchThese.MIN_RATING)
-                + " on IMDb, streaming on JioHotstar. OK opens one.");
+                + (jio ? " on IMDb, streaming on JioHotstar. OK opens one."
+                       : " on IMDb, streaming on JioHotstar.\nJioHotstar is not installed "
+                               + "on this TV, so these cannot be opened from here."));
         intro.setTextSize(13);
-        intro.setTextColor(dim());
+        intro.setTextColor(jio ? dim() : 0xFFFFC857);
         intro.setLineSpacing(0, 1.12f);
         intro.setPadding(6, 0, 6, 8);
         vList.addView(intro);
@@ -2698,6 +2701,13 @@ public class OverlayController {
 
     /** Open a JioHotstar show page; the system routes hotstar.com to the app. */
     static boolean openShow(String url) {
+        // Every Watch These pick is a JioHotstar show page. Without the app the link
+        // falls to a browser, which then asks you to sign in to a site - say what
+        // happened instead of pretending it opened.
+        if (!installed("in.startv.hotstar")) {
+            notice("JioHotstar is not installed on this TV.");
+            return false;
+        }
         try {
             android.content.Intent i = new android.content.Intent(
                     android.content.Intent.ACTION_VIEW, Uri.parse(url));
@@ -3832,8 +3842,32 @@ public class OverlayController {
         h.poster.setImageBitmap(bm);
     }
 
+    /**
+     * True when an app is installed and can be started.
+     *
+     * Checked with the launcher intent rather than the package name alone: a package
+     * can be present but disabled, and starting it then throws.
+     */
+    static boolean installed(String pkg) {
+        if (pkg == null || pkg.isEmpty()) return false;
+        try {
+            android.content.pm.PackageManager pm = vCtx.getPackageManager();
+            return pm.getLeanbackLaunchIntentForPackage(pkg) != null
+                    || pm.getLaunchIntentForPackage(pkg) != null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     static boolean launch(Watcher.Item it) {
         android.content.Intent i = null;
+        // A record from an app that has since been uninstalled used to do nothing at
+        // all: launch() returned false and the caller silently kept the card open.
+        if (it.pkg != null && !installed(it.pkg)) {
+            notice(shortName(it.pkg) + " is not installed on this TV.");
+            Log.i(TAG, "missing app, cannot launch: " + it.pkg + " (" + it.title + ")");
+            return false;
+        }
         // No provider deeplink, but the record knows its show and episode ids and the
         // user may have named the show: build the route ourselves.
         if ((it.intent == null || it.intent.isEmpty()) && it.epid != null

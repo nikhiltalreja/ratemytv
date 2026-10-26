@@ -179,6 +179,8 @@ JioHotstar, dark theme, on a Mi TV at 1080p:
 |---|---|---|
 | ![Watch list](docs/shot-watching.png) | ![Grid](docs/shot-grid.png) | ![Watch These](docs/shot-watch-these.png) |
 
+Capture steps and the full six-screen set: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
+
 ## Feature demos
 
 Recorded on the TV itself. JioHotstar in front, remote only.

@@ -40,3 +40,8 @@ on to capture. The splash matches the service in the still.
 `docs/demo-instant-switch.gif` — The Bear playing; the card opens on Mobland, focus and
 OK switch to Mobland, and ALT+TAB brings The Bear back. 720×405, 76 frames, 6.3 s,
 2.4 MB.
+
+## Reel
+
+A 9:16 Instagram edit of all three demos, repeated three times: [REEL.md](REEL.md).
+`docs/reel.mp4` is the upload, `docs/reel.gif` the preview.

@@ -2773,9 +2773,20 @@ public class OverlayController {
                                         "IMDb below 6.0")));
 
                         TextView inHistory = new TextView(vCtx);
-                        inHistory.setText(total + (total == 1 ? " title" : " titles")
-                                + " recorded on this TV");
-                        inHistory.setTextSize(13);
+                        // The count leads, so it carries the weight: the tail is the
+                        // explanation and reads as a caption.
+                        String count = total + (total == 1 ? " title" : " titles");
+                        android.text.SpannableString line =
+                                new android.text.SpannableString(count
+                                        + " recorded on this TV");
+                        line.setSpan(new android.text.style.StyleSpan(Typeface.BOLD),
+                                0, count.length(),
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        line.setSpan(new android.text.style.ForegroundColorSpan(txt()),
+                                0, count.length(),
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        inHistory.setText(line);
+                        inHistory.setTextSize(14);
                         inHistory.setTextColor(dim());
                         inHistory.setPadding(6, 2, 6, 0);
                         vList.addView(inHistory);

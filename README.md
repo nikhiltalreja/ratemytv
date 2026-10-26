@@ -126,8 +126,8 @@ is paid, and is the one that explicitly supports the Netflix button on Xiaomi TV
 
 1. Install [Button Mapper](https://play.google.com/store/apps/details?id=flar2.homebutton)
    and allow its accessibility service.
-2. Add the remote button, set **Long press → Apps → Rate My TV**, and leave the single
-   press alone.
+2. Add the remote button, set its **long press** to launch **Rate My TV**, and leave the
+   single press alone.
 3. Its UI is made for phones, so the D-pad can be fiddly; a mouse helps. If the TV's
    Play Store does not list it, use tvQuickActions Pro below.
 
@@ -139,7 +139,7 @@ Launching an app is free; the paid Pro adds intents, scripts and themes.
    ($3.99). Its listing says it explicitly supports the Xiaomi Netflix button; the free
    version does not list that support.
 2. Allow its **Accessibility service**.
-3. Add the Netflix button, set **Long press → Open app → Rate My TV**, and leave the
+3. Add the Netflix button, set its **long press** to open **Rate My TV**, and leave the
    single press alone.
 4. Save. While watching, hold the button: the card opens over the player.
 

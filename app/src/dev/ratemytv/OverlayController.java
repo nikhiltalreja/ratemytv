@@ -46,6 +46,7 @@ public class OverlayController {
     static View vHeadSep;
     static LinearLayout vList, vSorter, vNow, vUpdate;
     static TextView vUpdateBtn;
+    /** The floating notice: its own window, so it never reflows the card. */
     static TextView vNotice;
     static boolean vUpdateFocused;
     static TextView vNowTime;
@@ -362,14 +363,10 @@ public class OverlayController {
         tabKeys(vTab3, TAB_SETTINGS);
         card.addView(tabs);
 
-        // Outside the ScrollView on purpose: what is playing must stay put while
-        // the list scrolls, as the handoff draws it.
-        vNotice = new TextView(vCtx);
-        vNotice.setTextSize(13);
-        vNotice.setPadding(20, 10, 16, 10);
-        vNotice.setVisibility(View.GONE);
-        card.addView(vNotice, new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        // The notice is a separate floating window, not a child of this column: as a
+        // child it took a slice of the layout whenever it appeared and pushed the card
+        // below it - the flyout jumped down every time a message showed.
+        vNotice = null;
 
         vUpdate = new LinearLayout(vCtx);
         vUpdate.setOrientation(LinearLayout.VERTICAL);
@@ -1775,23 +1772,57 @@ public class OverlayController {
      * text toasts from background contexts), so refusals are shown in the card itself.
      */
     static void notice(String msg) {
-        if (vNotice == null) {
+        if (wm == null || vCtx == null) {
             toast(msg);
             return;
         }
-        vNotice.setText(msg);
-        vNotice.setTextColor(accent());
-        vNotice.setBackground(rounded(light() ? 0xE6FFFFFF : 0xE6111929, 14, accent()));
-        vNotice.setVisibility(View.VISIBLE);
-        vNotice.removeCallbacks(hideNotice);
-        vNotice.postDelayed(hideNotice, 4500);
+        try {
+            if (vNotice == null) {
+                vNotice = new TextView(vCtx);
+                vNotice.setTextSize(14);
+                vNotice.setTypeface(Typeface.DEFAULT_BOLD);
+                vNotice.setPadding(dp(20), dp(11), dp(20), dp(11));
+                WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        ViewGroup.LayoutParams.WRAP_CONTENT,
+                        WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
+                        // Never takes focus or touch: a message must not become a
+                        // control, and must not disturb what the remote is aimed at.
+                        WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                                | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                        PixelFormat.TRANSLUCENT);
+                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                lp.y = dp(96);
+                wm.addView(vNotice, lp);
+            }
+            vNotice.setText(msg);
+            vNotice.setTextColor(light() ? 0xFF14192B : 0xFFFFFFFF);
+            vNotice.setBackground(rounded(light() ? 0xF2FFFFFF : 0xF2141E33, 16,
+                    light() ? 0xFF1B63C7 : 0xFF7EE0FF));
+            vNotice.removeCallbacks(hideNotice);
+            vNotice.postDelayed(hideNotice, 3600);
+        } catch (Exception e) {
+            Log.w(TAG, "notice: " + e);
+            toast(msg);
+        }
     }
 
     static final Runnable hideNotice = new Runnable() {
         public void run() {
-            if (vNotice != null) vNotice.setVisibility(View.GONE);
+            removeNotice();
         }
     };
+
+    /** Take the floating notice down. Safe to call when there is nothing up. */
+    static void removeNotice() {
+        if (vNotice == null) return;
+        View v = vNotice;
+        vNotice = null;
+        try {
+            if (wm != null) wm.removeView(v);
+        } catch (Exception ignored) {
+        }
+    }
 
     static void toast(String msg) {
         try {
@@ -3943,6 +3974,7 @@ public class OverlayController {
         if (root != null) {
             final View v = root;
             root = null;
+            removeNotice();   // its own window outlives the card otherwise
             v.animate().alpha(0f).setDuration(140).withEndAction(new Runnable() {
                 public void run() {
                     try { wm.removeView(v); } catch (Exception ignored) { }

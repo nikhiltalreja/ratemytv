@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Rate My TV</string>
+    <string name="svc_desc">Detects a long press of the Netflix remote key to open Rate My TV.</string>
+</resources>

@@ -1,0 +1,23 @@
+# build output
+app/*.apk
+app/app-unsigned.apk
+app/app-pkg.apk
+app/res.zip
+app/*.idsig
+app/classes/
+app/dexout/
+
+# local signing key: never commit
+app/debug.keystore
+*.keystore
+*.jks
+
+# editor / OS noise
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# local credentials
+.env
+*.env

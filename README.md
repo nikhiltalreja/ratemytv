@@ -296,9 +296,10 @@ had counted the disabled one as available.
 The wordmarks are drawn as type. A real logo would have to be a bundled asset — there is
 no trustworthy, licence-clean source a TV can fetch at runtime, and a scraped mark that
 sits wrong looks worse than clean type. Drop an official PNG at
-`app/assets/logos/<key>.png` (`netflix.png`, `prime-video.png`, `jiohotstar.png`,
-`sonymliv.png`…) and the rail uses it instead, no code change: the loader checks that path
-first.
+`app/assets/logos/<key>.png` — `netflix.png`, `prime-video.png`, `jiohotstar.png`,
+`sonyliv.png`, `apple-tv.png`, `mx-player.png`, `zee5.png`, `hoichoi.png`,
+`crunchyroll.png`, `new.png` — and the rail uses it instead, no code change: the loader
+checks that path first.
 
 Not listed, because the ratings catalogue carries no offers for them in this market, so
 there is nothing to join against: **Aha, Sun NXT, ETV Win, ManoramaMAX**. Amazon and Apple

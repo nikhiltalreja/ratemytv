@@ -195,6 +195,12 @@ pick; that service opens.
 
 ![Watch These: choose a pick and its service opens](docs/demo-watch-these.gif)
 
+**Instant switching (ALT+TAB).**
+The Bear is playing; open the card on Mobland and press RESUME, then ALT+TAB to bring
+The Bear back. No home screen in between.
+
+![Instant switching: The Bear to Mobland and back](docs/demo-instant-switch.gif)
+
 The demos below are recorded on the TV itself — JioHotstar in front, remote only.
 
 ### Ratings

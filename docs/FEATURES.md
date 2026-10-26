@@ -23,13 +23,19 @@ Watch These uses its own two-pane capture (`feature-watch-these.png`), not the R
 
 `docs/demo-overlay.gif` — a two-slide loop: The Bear's wide key art, then the card
 slides in over it and the IMDb **8.5** score on The Bear's row pulses. 720×405,
-52 frames, 922 KB.
+52 frames, 6.2 s, 922 KB.
 
 ## Watch These launch GIF
 
 `docs/demo-watch-these.gif` — the JioHotstar Watch These still; row 01 gets focus and a
-click, then cuts to the JioHotstar splash. 720×405, 42 frames, 482 KB.
+click, then cuts to the JioHotstar splash. 720×405, 42 frames, 5.0 s, 482 KB.
 
 The existing light still is the JioHotstar 2026 page, so the clicked row is *A Knight of
 the Seven Kingdoms*, not MobLand. MobLand lives under **New seasons**, which needs the TV
 on to capture. The splash matches the service in the still.
+
+## Instant switching GIF
+
+`docs/demo-instant-switch.gif` — The Bear playing; the card opens on Mobland, focus and
+OK switch to Mobland, and ALT+TAB brings The Bear back. 720×405, 76 frames, 6.3 s,
+2.4 MB.

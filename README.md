@@ -191,9 +191,9 @@ with The Bear's IMDb score.
 
 **Your IMDb, connected to the apps installed on your TV.**
 Watch These joins the ratings to what each installed service actually carries. Choose a
-pick; that service opens.
+pick; the service opens, then the title.
 
-![Watch These: choose a pick and its service opens](docs/demo-watch-these.gif)
+![Watch These: choose a pick; the splash opens, then the title](docs/demo-watch-these.gif?v=2)
 
 **Instant switching (ALT+TAB).**
 The Bear is playing; open the card on Mobland and press RESUME, then ALT+TAB to bring

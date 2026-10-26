@@ -1,7 +1,7 @@
 # Screenshots
 
-Six use cases, one image each. Five are to be recaptured on the current UI; **Watch
-These** is on hold while the cross-app browser is rebuilt.
+Six use cases, one image each. The first five are to be captured on the current UI;
+**Watch These** is on hold while the cross-app browser is rebuilt.
 
 | # | Use case | File | Status |
 |---|---|---|---|
@@ -9,7 +9,7 @@ These** is on hold while the cross-app browser is rebuilt.
 | 2 | Watching, grid | `docs/shot-grid.png` | recapture |
 | 3 | Stats | `docs/shot-stats.png` | recapture |
 | 4 | Settings | `docs/shot-settings.png` | recapture |
-| 5 | Menu | `docs/shot-menu.png` | recapture |
+| 5 | Menu | `docs/shot-menu.png` | new |
 | 6 | Watch These | `docs/shot-watch-these.png` | on hold |
 
 ## Before you capture

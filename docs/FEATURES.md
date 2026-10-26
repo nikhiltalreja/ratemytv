@@ -18,3 +18,9 @@ JioHotstar splash background, no OMDb key in frame.
 
 Watch These uses its own two-pane capture (`feature-watch-these.png`), not the README's
 `shot-watch-these.png`.
+
+## Overlay workflow GIF
+
+`docs/demo-overlay.gif` — a two-slide loop: the app canvas (JioHotstar, Netflix), then
+the card slides in over it with Mobland, and the IMDb **8.3** score pulses. 720×405,
+52 frames, 744 KB.

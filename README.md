@@ -112,29 +112,17 @@ bookmarks.
 ## One button while watching
 
 Rate My TV has no remote-key settings of its own. To open the card from the couch, give
-one button to a TV key mapper. Both of these work with the player in front and can
-launch **Rate My TV** on a long press.
+one button to a TV key mapper. **Button Mapper is the free one**; **tvQuickActions Pro**
+is paid, and is the one that explicitly supports the Netflix button on Xiaomi TVs.
 
-| | **tvQuickActions** | **Button Mapper** |
+| | **Button Mapper** | **tvQuickActions Pro** |
 |---|---|---|
-| Made for | Android TV / Google TV, remote-first | Phones first, but remaps remotes |
-| Price | Free; **Pro $3.99** | Free; Pro optional |
-| Xiaomi Netflix button | **Pro** says it supports it | May not see a key the firmware consumes |
-| Long press | Up to five actions on one button | Single, double and long press |
+| Price | Free to install; launching an app is in the free version | **$3.99**; a free version exists, but Xiaomi Netflix support is Pro |
+| Xiaomi Netflix button | Try it; may not see a key the firmware consumes | Explicitly supported |
+| Long press | Yes | Yes |
+| Made for | Phones first, remaps TV remotes | Android TV / Google TV |
 
-### tvQuickActions (recommended)
-
-1. Install [tvQuickActions](https://play.google.com/store/apps/details?id=dev.vodik7.tvquickactions.free)
-   from the Play Store. The free version maps most buttons; **Pro** is the one that
-   explicitly supports the Netflix button on Xiaomi TVs.
-2. Open it and allow its **Accessibility service**. That is how it sees the remote's key
-   before the player does.
-3. Add the button you want to give up, usually the Netflix key.
-4. Set **Long press → Open app → Rate My TV**. Leave **Single press** as it is, so the
-   button still does its old job.
-5. Save. While watching, hold the button: the card opens over the player.
-
-### Button Mapper
+### Button Mapper (free)
 
 1. Install [Button Mapper](https://play.google.com/store/apps/details?id=flar2.homebutton)
    and allow its accessibility service.
@@ -144,10 +132,22 @@ launch **Rate My TV** on a long press.
    Play Store does not list it, the APK is on
    [elementalx.org](https://elementalx.org/button-mapper/).
 
-Neither app needs root to launch an app. Only one accessibility service can take a
-key: if Rate My TV's own accessibility service is already on, turn it off before using
-a mapper. Fire TV has no Play Store; use the mapper from the Amazon Appstore if it is
-there, or sideload its APK.
+Launching an app is free; the paid Pro adds intents, scripts and themes.
+
+### tvQuickActions Pro (paid, only if the Netflix key resists)
+
+1. Install [tvQuickActions Pro](https://play.google.com/store/apps/details?id=dev.vodik7.tvquickactions)
+   ($3.99). Its listing says it explicitly supports the Xiaomi Netflix button; the free
+   version does not list that support.
+2. Allow its **Accessibility service**.
+3. Add the Netflix button, set **Long press → Open app → Rate My TV**, and leave the
+   single press alone.
+4. Save. While watching, hold the button: the card opens over the player.
+
+Launching an app needs no root and no ADB in either app. Only one accessibility service
+can take a key: if Rate My TV's own accessibility service is already on, turn it off
+before using a mapper. Fire TV has no Play Store; use the mapper from the Amazon
+Appstore if it is there, or sideload its APK.
 
 ## App support
 
@@ -218,7 +218,6 @@ from another app, and stats is the `STATS` tab.
 | Notification listener | `MediaSession` metadata and playback position | No live title; the app still records history |
 | `INTERNET` | Rating lookups, sitemap names, release check | No ratings, no names, no updates |
 | `REQUEST_INSTALL_PACKAGES` | Hand a downloaded APK to the installer | Update banner cannot install |
-| Accessibility service | Long press of the Netflix key | No long press; everything else works |
 
 ## Using the card
 

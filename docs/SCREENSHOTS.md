@@ -1,20 +1,20 @@
 # Screenshots
 
-Six use cases, one image each. The first five are to be captured on the current UI;
+Six use cases, one image each. The first five were captured on **1.0.6**, light theme;
 **Watch These** is on hold while the cross-app browser is rebuilt.
 
 | # | Use case | File | Status |
 |---|---|---|---|
-| 1 | Watching, list | `docs/shot-watching.png` | recapture |
-| 2 | Watching, grid | `docs/shot-grid.png` | recapture |
-| 3 | Stats | `docs/shot-stats.png` | recapture |
-| 4 | Settings | `docs/shot-settings.png` | recapture |
-| 5 | Menu | `docs/shot-menu.png` | new |
+| 1 | Watching, list | `docs/shot-watching.png` | captured |
+| 2 | Watching, grid | `docs/shot-grid.png` | captured |
+| 3 | Stats | `docs/shot-stats.png` | captured |
+| 4 | Settings | `docs/shot-settings.png` | captured |
+| 5 | Menu | `docs/shot-menu.png` | captured |
 | 6 | Watch These | `docs/shot-watch-these.png` | on hold |
 
 ## Before you capture
 
-- TV at **1920×1080** (`adb shell wm size`), dark theme, the build to be shipped.
+- TV at **1920×1080** (`adb shell wm size`), light theme, the build to be shipped.
 - At least two titles in `WATCHING` (for example The Bear and Mobland), so the list and
   grid are not empty.
 - JioHotstar signed in on the TV. Its splash is the clean background; do not start
@@ -33,6 +33,9 @@ For the background: force-stop and relaunch JioHotstar, then capture within abou
 the clean window is gone. The launcher is a fallback, but its top bar and app tiles show
 through the glass card.
 
+Post-process to 1920×1080: black outside the card's rounded frame, and mask the OMDb
+field before saving.
+
 ## 1. Watching, list
 
 Open the card on `WATCHING` (the default tab). Two rows with poster, score, plot, cast
@@ -50,7 +53,7 @@ Select the `STATS` tab. Capture the four cards.
 ## 4. Settings
 
 Select the `SETTINGS` tab. **The OMDb field contains a live key.** Clear it before
-capturing, or draw a black bar over the field. Never commit a screenshot with the key
+capturing, or mask the field with bullets. Never commit a screenshot with the key
 visible.
 
 ## 5. Menu
@@ -65,7 +68,7 @@ The tab is being rebuilt as a cross-app browser. Do not capture it until that la
 
 ## Rules
 
-- 1920×1080 PNG, dark theme.
+- 1920×1080 PNG, light theme.
 - No OMDb key, Wi-Fi name, profile name or account e-mail.
 - No playback behind the card: DRM blocks the capture.
 - If the app updates while capturing, start again; data and layout may reset.

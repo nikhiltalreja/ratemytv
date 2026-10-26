@@ -19,7 +19,7 @@ and the section below says exactly where that stops.
 
 Then it goes one step ahead of X-Ray. **Watch These** is a rolling list of the
 best-rated shows streaming on the services installed on this TV — JioHotstar, Netflix,
-Prime Video, ZEE5, SonyLIV, MX Player, Apple TV, Hoichoi and Crunchyroll, one section
+Prime Video, ZEE5, Apple TV, Hoichoi and Crunchyroll, one service per section
 per installed app. It is rebuilt from the ratings catalogue every 12 hours. OK on a
 pick opens the title in its app, with no search.
 
@@ -39,7 +39,7 @@ pick opens the title in its app, with no search.
 - **Ratings on demand.** IMDb score and votes, Rotten Tomatoes, plot, cast and year —
   for a JioHotstar title, in about a second.
 - **One step ahead of X-Ray.** **Watch These** lists the best-rated 2026 shows across
-  the nine services it covers, one section per installed app, refreshed every 12 hours.
+  the seven services it covers, one section per installed app, refreshed every 12 hours.
   OK opens the title in its app.
 - **Continue watching.** One list from this TV's own playback record, across apps,
   with progress and elapsed time.
@@ -173,7 +173,7 @@ apps, not of this one.
 
 ## Screenshots
 
-JioHotstar, dark theme, on a Mi TV at 1080p:
+On a Mi TV at 1080p:
 
 | Watching | Grid | Watch These |
 |---|---|---|
@@ -182,6 +182,11 @@ JioHotstar, dark theme, on a Mi TV at 1080p:
 Capture steps and the full six-screen set: [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md).
 
 ## Feature demos
+
+![The overlay workflow: what is playing, then the card over it with the IMDb score](docs/demo-overlay.gif)
+
+A two-slide overview, built from the card's own still: what is playing, then the card
+over it, with the Mobland IMDb score in focus.
 
 Recorded on the TV itself. JioHotstar in front, remote only.
 
@@ -227,7 +232,7 @@ from another app, and stats is the `STATS` tab.
 `WATCHING` lists titles this TV has played. `WATCH THESE` is two panes: the services
 installed on this TV on the left, the selected service's 2026 picks on the right.
 `STATS` summarises the month. `SETTINGS` holds the OMDb key, the theme, and the version
-(with the update state).
+(with the update state). Colour, type and focus rules live in [docs/UI.md](docs/UI.md).
 
 | Key | Action |
 |---|---|
@@ -237,6 +242,7 @@ installed on this TV on the left, the selected service's 2026 picks on the right
 | Right, Left | Cycle the focused row's actions: `RESUME`, `+ Bookmark`, then each saved scene and its delete |
 | OK | Activate the highlighted action |
 | Back | Close the card |
+| Right (menu open) | Close the flyout — it comes in from the left edge, so right puts it back |
 
 In `WATCH THESE` a key never means two things — the pane with focus decides:
 
@@ -247,6 +253,32 @@ In `WATCH THESE` a key never means two things — the pane with focus decides:
 
 Only the focused row draws `RESUME` in the accent colour; the rest stay dark, so the
 active control is unambiguous.
+
+Row titles are **one size, 20sp, in both tabs** — down 17% from the original 24 in
+`WATCHING` and 13% from 23 in `WATCH THESE`. They were briefly 21 and 20: two numbers
+that happened to round to the same cap height on this panel but still read as a mismatch.
+Both now come from `TITLE_SP`, so they cannot drift apart again. At ten feet the title
+still sets at ~1.5× the meta line and stays the first thing read, but long rows like
+*A Knight of the Seven Kingdoms* stop crowding the score badge and the actions. The grid's
+card titles were already smaller and are unchanged.
+
+### Light mode is not a website
+
+A TV is watched from three metres, so "secondary" has to mean *smaller*, not *fainter*:
+
+- Secondary greys are much darker on the light card (`#2C3549` and `#4A5468` instead of
+  `#3E4A66`/`#6A7590`), taking them from roughly 3:1 to 7:1 and 5:1.
+- **Letter-spacing is near-flat on labels** — `NEW SEASONS · 5 PICKS` and the section
+  headers were tracked at 0.10–0.22em, which on a light card with grey text turned into
+  a row of separated hairlines. Titles keep their tighter setting; labels now sit at
+  0.03–0.06em.
+- Brand inks have a **light-mode variant**: Apple TV drops to near-black (`#2F3238`)
+  because its dark-mode near-white vanished, Netflix deepens to `#C40812`, and the
+  "not installed" tiles keep their own colour at higher alpha rather than going grey.
+- The score badge splits into two golds: a bright fill with dark text for 8.5+, and a
+  darker ink (`#7A5200`) for the outlined 8.0+ badge, which was gold-on-white at 3.4:1.
+
+![Watch These, light theme](docs/shot-watch-these-light.png)
 
 ### Bookmarks
 
@@ -266,8 +298,8 @@ playing the list is always by recency, with that title pinned first.
 
 ### Watch These
 
-Series that began in 2026, each above 7.0 on IMDb, on any of **nine services**: JioHotstar,
-Netflix, Prime Video, ZEE5, SonyLIV, MX Player, Apple TV, Hoichoi and Crunchyroll. The list
+Series that began in 2026, each above 7.0 on IMDb, on any of **seven services**: JioHotstar,
+Netflix, Prime Video, ZEE5, Apple TV, Hoichoi and Crunchyroll. The list
 is fetched live on the TV from one public, keyless ratings catalogue the card also uses to
 fill scores OMDb lacks. Three requests of 100 shows each carry title, year, three genres,
 the IMDb score and vote count, and the offers — which service carries it and its canonical
@@ -276,12 +308,14 @@ URL. About **175 KB**, still with no poster, plot or cast.
 Each title is placed on the first service, in that order, that carries it, so nothing is
 listed twice. Rating must be strictly above 7.0 with at least 1 000 votes; the result is
 sorted by rating then votes and **capped at six per service** — Netflix alone had 36
-qualifying series, which is a catalogue, not a shortlist. 28 rows on the test TV.
+qualifying series, which is a catalogue, not a shortlist. About 25 rows on the test TV.
 
 The panel is **two panes**: a rail of services on the left — a wide wordmark in each
-brand's own colour, with its count — and one service's collection on the right, headed
-`APPLE TV · 5 TITLES`. The rail remembers the last service you opened, and scrolls when
-there are more services than fit.
+brand's own colour, with its count — and one service's collection on the right. The rail
+remembers the last service you opened. The selected service's name and count
+(`NETFLIX · 6 TITLES`) sit on their own line above both panes, not inside the collection:
+a heading in the pane pushed its first title down and left it a few pixels below the
+first rail tile. Now the two columns start on the same line.
 
 A service whose app this TV cannot open stays in the rail, dimmed, labelled
 **"Not installed · install"**, and its page shows the same picks with an `INSTALL` action:
@@ -289,17 +323,49 @@ OK opens the Play Store listing, so a missing service is one press from being ad
 `NEW SEASONS` is the last tile — the hand-checked row from below, kept out of the live
 pages because it is curated, not fetched.
 
-"Installed" means **launchable**, not merely present: this Mi TV ships an enabled SonyLIV
-(real app, leanback launcher) and a *disabled* MX Player preload, and an existence check
-had counted the disabled one as available.
+"Installed" means **launchable**, not merely present. This TV ships preloads that look
+installed: SonyLIV is a real app with a leanback launcher, while MX Player is a disabled
+stub (`enabled=3`). Both were removed from the rail on request; the lesson stands, and an
+existence check would still have counted the disabled one as available.
+
+Links name their app, and use the service's own **Android TV intent** when the catalogue
+publishes one. JustWatch exposes `deeplinkURL(platform: ANDROID_TV)` per offer, and it is
+exactly what a TV needs:
+
+```
+intent://www.netflix.com/watch/82116553#Intent;launchFlags=0x00800000;
+scheme=https;package=com.netflix.ninja;S.source=30;end
+```
+
+Note `/watch/<id>` — it starts playback, not just the details page — and the package and
+launch flags ride along, so no browser can win the link. The card stores that string and
+launches it with `Intent.parseUri(..., URI_INTENT_SCHEME)`. When an offer has no TV
+deeplink, it falls back to the web URL with the package set explicitly.
+
+Before that, the plain `https://www.netflix.com/title/<id>` was handed to the system with
+no package: a browser also claims `https` and won, and even with the package pinned the
+app only came to the front at Home. The `nflx://` scheme was tried in between; it is not
+better.
+
+Remaining caveat, and it is Netflix's: on a cold start with no profile chosen, the profile
+picker can swallow the incoming link. The link is delivered — `dumpsys` shows it on
+`com.netflix.ninja/.MainActivity` — but what Netflix does after profile selection is its
+own decision, and its screen cannot be observed (FLAG_SECURE blocks screenshots).
 
 The wordmarks are drawn as type. A real logo would have to be a bundled asset — there is
 no trustworthy, licence-clean source a TV can fetch at runtime, and a scraped mark that
 sits wrong looks worse than clean type. Drop an official PNG at
 `app/assets/logos/<key>.png` — `netflix.png`, `prime-video.png`, `jiohotstar.png`,
-`sonyliv.png`, `apple-tv.png`, `mx-player.png`, `zee5.png`, `hoichoi.png`,
-`crunchyroll.png`, `new.png` — and the rail uses it instead, no code change: the loader
-checks that path first.
+`apple-tv.png`, `zee5.png`, `hoichoi.png`, `crunchyroll.png`, `new.png` — and the rail
+uses it instead, no code change: the loader checks that path first.
+
+Each tile sits on a **dark scrim plate** with a hairline in the service's colour. Without
+it the saturated marks bloomed against the purple card — Netflix red worst of all — while
+the dull ones read as dead buttons. Brand inks are tuned for a dark card rather than a
+white web page: Netflix lifted to `#FF6B6B`, Apple TV to near-white `#E9E9F0` (its slate
+grey looked disabled), ZEE5 and Crunchyroll brightened. A service that is not installed
+keeps its own colour at reduced alpha, not grey — grey reads as "broken", which is exactly
+how Apple TV looked.
 
 Not listed, because the ratings catalogue carries no offers for them in this market, so
 there is nothing to join against: **Aha, Sun NXT, ETV Win, ManoramaMAX**. Amazon and Apple
@@ -438,6 +504,7 @@ app/
     WatchThese.java        live join: Hotstar index + public ratings, 12 h cache
 docs/
   PROVIDERS.md             what each app publishes, measured
+  UI.md                    ten-foot UI rules: contrast floors, type scale, both themes
 tools/probe/               diagnostic APK: dumps every watch-next row and column
 ```
 

@@ -186,7 +186,7 @@ Capture steps and the full six-screen set: [docs/SCREENSHOTS.md](docs/SCREENSHOT
 ![The overlay workflow: what is playing, then the card over it with the IMDb score](docs/demo-overlay.gif)
 
 A two-slide overview, built from the card's own still: what is playing, then the card
-over it, with the Mobland IMDb score in focus.
+over it, with The Bear's IMDb score in focus.
 
 Recorded on the TV itself. JioHotstar in front, remote only.
 

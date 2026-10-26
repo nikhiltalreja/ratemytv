@@ -21,9 +21,9 @@ Watch These uses its own two-pane capture (`feature-watch-these.png`), not the R
 
 ## Overlay workflow GIF
 
-`docs/demo-overlay.gif` — a two-slide loop: the app canvas (JioHotstar, Netflix), then
-the card slides in over it with Mobland, and the IMDb **8.3** score pulses. 720×405,
-52 frames, 744 KB.
+`docs/demo-overlay.gif` — a two-slide loop: The Bear's wide key art, then the card
+slides in over it and the IMDb **8.5** score on The Bear's row pulses. 720×405,
+52 frames, 922 KB.
 
 ## Watch These launch GIF
 

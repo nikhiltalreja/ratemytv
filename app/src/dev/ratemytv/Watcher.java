@@ -355,7 +355,16 @@ public class Watcher extends NotificationListenerService {
                         }
                     }
                 } else {
-                    // No session. Apps like Netflix and Apple TV publish their row only
+                    // No session at all. Prime Video keeps one but reports state NONE
+                    // with no item, so nothing is picked and the last values would sit
+                    // there for hours: the card named JioHotstar while Prime played.
+                    // Clearing them means the card says nothing rather than something
+                    // wrong.
+                    CUR_PKG = null;
+                    CUR_TITLE = null;
+                    CUR_SERIES = null;
+                    CUR_PLAYING = false;
+                    // Apps like Netflix and Apple TV publish their row only
                     // after they lose the player (Apple ~16 s, Netflix 6-10 min), so watch
                     // for a row that lands where we stopped and adopt it as watched-here.
                     long now = System.currentTimeMillis();

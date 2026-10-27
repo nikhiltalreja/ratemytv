@@ -310,6 +310,13 @@ public class OverlayController {
     static void show(final Context ctx) {
         Log.i(TAG, "show() root=" + (root != null));
         if (root != null) return;
+        // A brand-new window has nothing on screen, whatever the last one left behind.
+        // These are static and a fresh card never ran clearList, so the first fill
+        // compared its rows against the previous card's and skipped drawing entirely.
+        shownCont = null;
+        shownFresh = null;
+        lastCont = null;
+        lastRowsAt = 0;
         vCtx = ctx.getApplicationContext();
         wm = (WindowManager) vCtx.getSystemService(Context.WINDOW_SERVICE);
         key(vCtx, KeyEvent.KEYCODE_MEDIA_PAUSE);

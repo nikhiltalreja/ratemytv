@@ -2060,7 +2060,11 @@ public class OverlayController {
         }
         int slot = on ? 1 : 0;
         if (FOCUS_CACHE[slot] == null) FOCUS_CACHE[slot] = buildFocusBg(on);
-        return FOCUS_CACHE[slot];
+        // A clone, every time. Handing the same instance to several rows shares its
+        // bounds, and the row that drew last wins: one row's background came out
+        // shorter than its own text, which then hung over the card. ConstantState is
+        // still shared, so this is cheap - only the wrapper is new.
+        return FOCUS_CACHE[slot].getConstantState().newDrawable();
     }
 
     static android.graphics.drawable.Drawable buildFocusBg(boolean on) {
@@ -2173,7 +2177,8 @@ public class OverlayController {
             }
             RESUME_CACHE[slot] = d;
         }
-        t.setBackground(RESUME_CACHE[slot]);
+        // Clone per pill for the same reason as focusBg: shared bounds.
+        t.setBackground(RESUME_CACHE[slot].getConstantState().newDrawable());
         // No elevation: a shadow on a translucent overlay costs an extra draw pass
         // every frame it is on screen, and on a TV it buys almost nothing.
         t.setElevation(0f);
@@ -2650,6 +2655,14 @@ public class OverlayController {
             if (h.cast != null && i.actors != null) {
                 h.cast.setText("Stars  " + i.actors.replace(", ", "  \u00B7  "));
                 h.cast.setVisibility(View.VISIBLE);
+            }
+            // The row was measured while the synopsis and cast lines were still
+            // placeholders (or hidden), so the text that arrived afterwards hung below
+            // the card's own background. Ask the row to measure itself again.
+            if (h.poster != null && h.poster.getParent() instanceof View) {
+                View rowView = (View) h.poster.getParent();
+                rowView.requestLayout();
+                rowView.invalidate();
             }
             boolean noart = it.poster == null || it.poster.isEmpty();
             if (i.poster != null && !i.poster.isEmpty() && (!h.wideFrame || noart)) {

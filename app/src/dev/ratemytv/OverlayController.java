@@ -36,6 +36,15 @@ import java.util.Map;
 public class OverlayController {
     static final String TAG = "RATEMYTV";
 
+    /**
+     * Row title size, shared by WATCHING and WATCH THESE.
+     *
+     * They were 24 and 23 before the 12% trim, then 21 and 20 — two numbers that
+     * rounded to the same 30px cap height here but were not the same number, which is
+     * exactly the kind of drift that makes two lists look mismatched. One constant.
+     */
+    static final int TITLE_SP = 20;
+
     static View root;
     static WindowManager wm;
     static Context vCtx;
@@ -55,6 +64,10 @@ public class OverlayController {
     static int vListW;
     static int vCardW;
     static ScrollView vScroll;
+    /** Hosts the scrolling list and the two-pane body; the flyout floats on top of it. */
+    static android.widget.FrameLayout vBody;
+    static View vMenuPanel;
+    static boolean menuAfterBoot;
     /** WATCH THESE is two panes: services on the left, one collection on the right. */
     static LinearLayout vTheseWrap, vRail, vThesePane, vTheseList;
     static ScrollView vTheseScroll, vRailScroll;
@@ -95,6 +108,8 @@ public class OverlayController {
     /** Tab the menu was opened from, so closing it puts the card back. */
     static int menuReturnTab = TAB_WATCHING;
     static boolean menuOpen;
+    /** The view that had focus when the flyout opened, so closing can restore it. */
+    static View menuReturnFocus;
     /** 0 most recent first, 1 best rated first. */
     static int sortMode;
     /** 0 list of rows (tall posters), 1 grid of cards (wide art). */
@@ -168,6 +183,16 @@ public class OverlayController {
                     && e.getKeyCode() == KeyEvent.KEYCODE_DPAD_LEFT;
         }
 
+        /**
+         * RIGHT closes the flyout, the way it closes a drawer: it came in from the left
+         * edge, so pushing right is the gesture that puts it back. Without this the
+         * menu only went away on LEFT or BACK, and RIGHT did nothing at all.
+         */
+        static boolean right(KeyEvent e) {
+            return e.getAction() == KeyEvent.ACTION_DOWN
+                    && e.getKeyCode() == KeyEvent.KEYCODE_DPAD_RIGHT;
+        }
+
         static boolean onTabRow() {
             return (vTab0 != null && vTab0.isFocused())
                     || (vTab1 != null && vTab1.isFocused())
@@ -205,19 +230,37 @@ public class OverlayController {
                 else dismiss(true);
                 return true;
             }
+            if (menuOpen && right(e)) {
+                closeMenu();
+                return true;
+            }
             if (left(e)) {
                 if (menuOpen) {
                     closeMenu();
                     return true;
                 }
-                // The WATCH THESE pane owns LEFT while its rows have focus: it steps
-                // back to the service rail, which is a movement, not a menu.
-                if (!onTabRow() && !inThesePane()) {
+                // LEFT walks back one level, then opens the menu:
+                //   collection -> rail -> menu
+                // The collection's own row listener does the first step; everything
+                // else (rail, plain rows, blank space) opens the flyout.
+                if (!onTabRow() && !inTheseCollection()) {
                     openMenu();
                     return true;
                 }
             }
             return super.dispatchKeyEvent(e);
+        }
+
+        /** Focus is on a title row of the WATCH THESE collection. */
+        static boolean inTheseCollection() {
+            View f = root == null ? null : root.findFocus();
+            View p = f;
+            while (p != null) {
+                if (p == vTheseList) return true;
+                if (!(p.getParent() instanceof View)) break;
+                p = (View) p.getParent();
+            }
+            return false;
         }
     }
 
@@ -234,8 +277,16 @@ public class OverlayController {
 
     static int accent() { return light() ? 0xFF1B63C7 : 0xFF7EE0FF; }
     static int txt() { return light() ? 0xFF14192B : 0xFFFFFFFF; }
-    static int dim() { return light() ? 0xFF3E4A66 : 0xFFB9C2DE; }
-    static int dim2() { return light() ? 0xFF6A7590 : 0xFF9AA6C8; }
+    /**
+     * Secondary text, tuned for a TV rather than a web page.
+     *
+     * On a light card the old greys (#3E4A66 at 13sp, #6A7590 at 11sp) sat at roughly
+     * 3:1 with wide tracking - legible on a monitor, mush from three metres. These are
+     * darker and keep at least ~7:1 and ~5:1 against the card, which is what a remote-
+     * driven UI needs; "secondary" means smaller, not faint.
+     */
+    static int dim() { return light() ? 0xFF2C3549 : 0xFFB9C2DE; }
+    static int dim2() { return light() ? 0xFF4A5468 : 0xFF9AA6C8; }
     // Keep the main overlay glassy, but give each content row a readable surface.
     // The old 6% light fill let the launcher artwork bleed through the synopsis and
     // bookmark controls, especially in list mode. A cool-white translucent surface
@@ -456,11 +507,16 @@ public class OverlayController {
         vScroll.setVerticalScrollBarEnabled(false);
         vScroll.setVerticalFadingEdgeEnabled(true);
         vScroll.setFadingEdgeLength(40);
-        vScroll.setLayoutParams(new LinearLayout.LayoutParams(listW, 0, 1f));
         vList = new LinearLayout(vCtx);
         vList.setOrientation(LinearLayout.VERTICAL);
         vScroll.addView(vList);
-        card.addView(vScroll);
+
+        // Everything the tabs draw lives in this frame, so the LEFT flyout can sit on
+        // top of it instead of replacing it: a menu that swapped the page out made the
+        // pane vanish, which read as the tab losing its content.
+        vBody = new android.widget.FrameLayout(vCtx);
+        vBody.addView(vScroll, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
         // The WATCH THESE body: a rail of services and one collection beside it. It
         // shares the card's height with the scroll above; buildTab() shows one or the
@@ -472,7 +528,9 @@ public class OverlayController {
 
         vRail = new LinearLayout(vCtx);
         vRail.setOrientation(LinearLayout.VERTICAL);
-        vRail.setPadding(0, 4, 10, 4);
+        // No top padding: the first tile has to start on the same pixel as the first
+        // row of the collection, or the two panes look out of step.
+        vRail.setPadding(0, 0, 10, 4);
         // Nine services do not fit the card at 1080p, so the rail scrolls itself;
         // D-pad focus already brings the selected tile into view.
         vRailScroll = new ScrollView(vCtx);
@@ -500,12 +558,15 @@ public class OverlayController {
         vThesePane = new LinearLayout(vCtx);
         vThesePane.setOrientation(LinearLayout.VERTICAL);
 
+        // The service name lives in the card's status line, not inside this pane: a
+        // heading here pushed the first title down and misaligned it with the first
+        // rail tile. Both panes now start on the same pixel.
         vPaneTitle = new TextView(vCtx);
-        vPaneTitle.setTextSize(13);
-        vPaneTitle.setLetterSpacing(0.10f);
+        vPaneTitle.setTextSize(14);
+        vPaneTitle.setLetterSpacing(0.03f);
         vPaneTitle.setTextColor(dim());
-        vPaneTitle.setPadding(4, 8, 4, 10);
-        vThesePane.addView(vPaneTitle);
+        vPaneTitle.setPadding(2, 4, 2, 6);
+        vPaneTitle.setVisibility(View.GONE);
 
         vTheseScroll = new ScrollView(vCtx);
         vTheseScroll.setVerticalScrollBarEnabled(false);
@@ -519,7 +580,10 @@ public class OverlayController {
 
         vTheseWrap.addView(vThesePane, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
-        card.addView(vTheseWrap);
+        vBody.addView(vTheseWrap, new android.widget.FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        card.addView(vPaneTitle);
+        card.addView(vBody, new LinearLayout.LayoutParams(listW, 0, 1f));
 
         // CREDIT: the @nikhiltalrejasocial footer must stay in every build.
         // Do not remove it, hide it, make it configurable, or move it off-screen.
@@ -571,6 +635,12 @@ public class OverlayController {
                 .getInt("layout", 0);
         chrome();
         buildTab();
+        // A theme change rebuilds the whole card; the menu was open when it happened,
+        // so put it back rather than leaving the user on a page they did not choose.
+        if (menuAfterBoot) {
+            menuAfterBoot = false;
+            openMenu();
+        }
         // Ask once per process; the answer drives the banner in renderUpdate().
         vUpdateFocused = false;
         Updater.check(vCtx);
@@ -622,7 +692,7 @@ public class OverlayController {
         int on = accent(), off = dim2();
         // With the menu open the tab row keeps showing where you were, so closing the
         // menu is not a surprise about which page you will land on.
-        int active = menuOpen ? menuReturnTab : tab;
+        int active = tab;
         vTab0.setTextColor(active == TAB_WATCHING ? on : off);
         vTab1.setTextColor(active == TAB_THESE ? on : off);
         vTab2.setTextColor(active == TAB_STATS ? on : off);
@@ -828,6 +898,7 @@ public class OverlayController {
         boolean twoPane = tab == TAB_THESE;
         if (vScroll != null) vScroll.setVisibility(twoPane ? View.GONE : View.VISIBLE);
         if (vTheseWrap != null) vTheseWrap.setVisibility(twoPane ? View.VISIBLE : View.GONE);
+        if (vPaneTitle != null) vPaneTitle.setVisibility(twoPane ? View.VISIBLE : View.GONE);
         if (tab == TAB_WATCHING) {
             // Coming back to a list we built seconds ago: paint it in this frame, then
             // let the worker confirm it. Without this the tab sat on the previous
@@ -839,7 +910,6 @@ public class OverlayController {
             buildWatching();
         } else if (tab == TAB_THESE) buildThese();
         else if (tab == TAB_STATS) buildStats();
-        else if (tab == TAB_MENU) buildMenu();
         else buildSettings();
         paintFocus();
     }
@@ -910,8 +980,28 @@ public class OverlayController {
     static void buildWatching() {
         new Thread(new Runnable() {
             public void run() {
-                final List<Watcher.Item> cont = allRows(true);
-                final List<Watcher.Item> fresh = allRows(false);
+                List<Watcher.Item> c = allRows(true);
+                List<Watcher.Item> f = allRows(false);
+                // The TV Provider fails transiently (a SecurityException on the watch
+                // next query, or a provider still starting). One quiet retry covers the
+                // blank tab that used to appear on some cold starts.
+                if (c.isEmpty() && f.isEmpty()) {
+                    try {
+                        Thread.sleep(900);
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    c = allRows(true);
+                    f = allRows(false);
+                }
+                // Still nothing, but something is already on screen: keep it rather than
+                // wiping the list the user is looking at.
+                if (c.isEmpty() && f.isEmpty() && lastCont != null && !lastCont.isEmpty()) {
+                    Log.i(TAG, "empty result; keeping " + lastCont.size() + " rows");
+                    return;
+                }
+                final List<Watcher.Item> cont = c;
+                final List<Watcher.Item> fresh = f;
                 lastCont = cont;
                 lastFresh = fresh;
                 lastRowsAt = System.currentTimeMillis();
@@ -1120,7 +1210,7 @@ public class OverlayController {
         TextView h = new TextView(vCtx);
         h.setText(text);
         h.setTextSize(13);
-        h.setLetterSpacing(0.10f);
+        h.setLetterSpacing(0.03f);
         h.setTextColor(dim());
         h.setPadding(4, 14, 4, 8);
         return h;
@@ -1271,7 +1361,10 @@ public class OverlayController {
         boolean labelOnly = it.title != null
                 && it.title.matches("(?i)^s\\d+\\s*e\\d+.*");
         h.title.setText(it.ep != null && !labelOnly ? it.title + "  " + it.ep : it.title);
-        h.title.setTextSize(24);
+        // 24 -> 20: one constant for both tabs. 21 and 20 rounded to the same 30px cap
+        // height on this panel, which is why the two tabs still looked different:
+        // they must be the same number, not two numbers that happen to agree.
+        h.title.setTextSize(TITLE_SP);
         h.title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         h.title.setTextColor(txt());
         h.title.setSingleLine(true);
@@ -1284,7 +1377,7 @@ public class OverlayController {
             TextView src = new TextView(vCtx);
             src.setText(shortName(it.alsoOn).toUpperCase());
             src.setTextSize(9);
-            src.setLetterSpacing(0.12f);
+            src.setLetterSpacing(0.04f);
             src.setTypeface(Typeface.DEFAULT_BOLD);
             src.setTextColor(dim2());
             src.setPadding(12, 5, 12, 5);
@@ -1376,21 +1469,28 @@ public class OverlayController {
         // and cast. They are thinner than the text they stand in for, so a row waiting
         // on the network is shorter than a finished one - and if nothing arrives, this
         // is what is removed.
-        startSkeleton(h);
-        final Holder pending = h;
-        vList.postDelayed(new Runnable() {
-            public void run() {
-                if (!pending.loading) return;
-                stopSkeleton(pending);
-                if (pending.plot != null) pending.plot.setVisibility(View.GONE);
-                if (pending.cast != null) pending.cast.setVisibility(View.GONE);
-                if (pending.rating != null) {
-                    pending.rating.setText("not rated");
-                    pending.rating.setTextColor(dim2());
+        if (wantsRatings(it)) {
+            startSkeleton(h);
+            final Holder pending = h;
+            vList.postDelayed(new Runnable() {
+                public void run() {
+                    if (!pending.loading) return;
+                    stopSkeleton(pending);
+                    if (pending.plot != null) pending.plot.setVisibility(View.GONE);
+                    if (pending.cast != null) pending.cast.setVisibility(View.GONE);
+                    if (pending.rating != null) {
+                        pending.rating.setText("not rated");
+                        pending.rating.setTextColor(dim2());
+                    }
+                    Log.i(TAG, "skeleton timeout: " + pending.item.title);
                 }
-                Log.i(TAG, "skeleton timeout: " + pending.item.title);
-            }
-        }, SKELETON_MS);
+            }, SKELETON_MS);
+        } else {
+            // Nothing is being fetched, so there is nothing to wait for: no placeholders,
+            // and the synopsis and cast lines close up rather than sitting empty.
+            if (h.plot != null) h.plot.setVisibility(View.GONE);
+            if (h.cast != null) h.cast.setVisibility(View.GONE);
+        }
         final LinearLayout bookmarks = bookmarkStrip(it, row);
         final TextView[] resumeRef = new TextView[1];
         row.setOnKeyListener(new View.OnKeyListener() {
@@ -2369,6 +2469,19 @@ public class OverlayController {
         return it.ep != null && !it.ep.isEmpty() ? "series" : "movie";
     }
 
+    /**
+     * Whether a row is worth asking OMDb about.
+     *
+     * YouTube rows are channel-plus-video titles ("Marques Brownlee - The Truth About
+     * X"), and OMDb answers with whatever film or series happens to share those words.
+     * A wrong score is worse than no score, and the card already offers a search link
+     * for those rows instead.
+     */
+    static boolean wantsRatings(Watcher.Item it) {
+        if (it == null) return false;
+        return it.pkg == null || !it.pkg.contains("youtube");
+    }
+
     /** A row's action cursor: 0 RESUME, then + Bookmark, each scene, each delete. */
     static class Acts {
         View row;
@@ -2452,6 +2565,9 @@ public class OverlayController {
                 int n = 0;
                 for (final Watcher.Item it : all) {
                     if (n++ >= 6) break;
+                    // YouTube is never looked up: its rows are channel-plus-video
+                    // titles, so OMDb answers with whatever film shares those words.
+                    if (!wantsRatings(it)) continue;
                     Ratings.Info info = cache.get(it.title);
                     if (info == null) {
                         info = Ratings.lookup(vCtx, it.title, kindOf(it));
@@ -2630,6 +2746,16 @@ public class OverlayController {
         for (int i = 0; i < vSheets.size(); i++) {
             if (vSheets.get(i).key.equals(saved)) sel = i;
         }
+        // Never land on a service that cannot be opened: an install prompt as the
+        // opening screen reads as "the tab is broken".
+        if (!vSheets.get(sel).installed) {
+            for (int i = 0; i < vSheets.size(); i++) {
+                if (vSheets.get(i).installed) {
+                    sel = i;
+                    break;
+                }
+            }
+        }
 
         for (int i = 0; i < vSheets.size(); i++) {
             final int index = i;
@@ -2656,16 +2782,23 @@ public class OverlayController {
         tile.setFocusable(true);
         tile.setFocusableInTouchMode(true);
         tile.setClickable(true);
-        tile.setPadding(12, 8, 10, 8);
+        // Six pixels, not eight: seven services plus the footnote have to fit the rail
+        // without clipping the last tile.
+        tile.setPadding(12, 6, 10, 6);
+        tile.setBackground(railTileBg(sheet.key, sheet.installed));
 
         TextView mark = new TextView(vCtx);
         mark.setText(wordmark(sheet.key));
-        mark.setTextSize(17);
+        mark.setTextSize(16);
         mark.setTypeface(Typeface.create("sans-serif-condensed", Typeface.BOLD));
         mark.setLetterSpacing(0.02f);
         mark.setSingleLine(true);
         mark.setEllipsize(android.text.TextUtils.TruncateAt.END);
-        mark.setTextColor(sheet.installed ? brand(sheet.key) : dim2());
+        // Missing services keep their own colour, dimmed - not grey. A grey wordmark
+        // reads like a disabled control, which is why Apple TV looked broken even when
+        // installed.
+        mark.setTextColor(sheet.installed ? brand(sheet.key)
+                : alpha(brand(sheet.key), light() ? 0xC0 : 0x8C));
 
         // A real wordmark wins when one is supplied: drop assets/logos/<key>.png and the
         // rail uses it with no code change, falling back to drawn type otherwise.
@@ -2676,7 +2809,7 @@ public class OverlayController {
             img.setImageBitmap(logo);
             img.setAdjustViewBounds(true);
             img.setScaleType(ImageView.ScaleType.FIT_START);
-            if (!sheet.installed) img.setAlpha(0.55f);
+            if (!sheet.installed) img.setAlpha(0.62f);
             tile.addView(img, new LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT, dp(30)));
         } else {
@@ -2692,8 +2825,6 @@ public class OverlayController {
         count.setTextColor(sheet.installed ? dim2() : accent());
         count.setPadding(0, 1, 0, 0);
         tile.addView(count);
-
-        if (!sheet.installed) tile.setAlpha(0.72f);
 
         tile.setOnClickListener(new View.OnClickListener() {
             public void onClick(View v) {
@@ -2712,10 +2843,8 @@ public class OverlayController {
         });
         tile.setOnFocusChangeListener(new View.OnFocusChangeListener() {
             public void onFocusChange(View v, boolean has) {
-                v.setAlpha(1f);
-                if (!has && !sheet.installed) v.setAlpha(0.72f);
                 v.setBackground(has ? rounded(rowTintSel(), 14, accent())
-                                    : rounded(0, 14, 0));
+                                    : railTileBg(sheet.key, sheet.installed));
                 if (has && index != vSheetIndex) selectSheet(index, false);
             }
         });
@@ -2723,13 +2852,36 @@ public class OverlayController {
         return tile;
     }
 
+    /**
+     * The scrim behind a wordmark: a dark plate with a hairline in the brand's colour.
+     *
+     * Without it the saturated marks (Netflix red especially) bloomed against the
+     * purple card and the dull ones looked like dead grey buttons. The plate gives
+     * every service the same footing and drops the red's glare.
+     */
+    static android.graphics.drawable.Drawable railTileBg(String key, boolean installed) {
+        int ink = brand(key);
+        int plate = light() ? 0x14101420 : 0x59000000;
+        int rim = installed ? alpha(ink, 0x40) : alpha(ink, 0x22);
+        return rounded(plate, 14, rim);
+    }
+
+    /** Same colour with a different alpha, keeping the channel values. */
+    static int alpha(int color, int a) {
+        return (color & 0x00FFFFFF) | (a << 24);
+    }
+
     /** Load one service's page into the right pane. */
     static void selectSheet(int index, boolean focusPane) {
         if (index < 0 || index >= vSheets.size()) return;
         vSheetIndex = index;
         Sheet sheet = vSheets.get(index);
-        vCtx.getSharedPreferences("xray", Context.MODE_PRIVATE).edit()
-                .putString("theseSheet", sheet.key).apply();
+        // Only a working service is worth remembering; otherwise the tab reopens on an
+        // install prompt instead of a collection.
+        if (sheet.installed) {
+            vCtx.getSharedPreferences("xray", Context.MODE_PRIVATE).edit()
+                    .putString("theseSheet", sheet.key).apply();
+        }
 
         vTheseList.removeAllViews();
         vTopRow = null;
@@ -2808,18 +2960,24 @@ public class OverlayController {
         return "New seasons";
     }
 
-    /** Brand colour for the tile. */
+    /**
+     * Brand ink, tuned twice: lifted and softened for the dark card, deepened for the
+     * light one. A mark that only works on one background is half a colour scheme —
+     * Apple TV's near-white vanished on the light card, and Netflix's red glowed on the
+     * dark one.
+     */
     static int brand(String key) {
-        if ("JIOHOTSTAR".equals(key)) return 0xFF3EA6FF;
-        if ("NETFLIX".equals(key)) return 0xFFE50914;
-        if ("PRIME VIDEO".equals(key)) return 0xFF00A8E1;
-        if ("ZEE5".equals(key)) return 0xFF9B4DE0;
-        if ("SONYLIV".equals(key)) return 0xFFFF5A36;
-        if ("MX PLAYER".equals(key)) return 0xFFF26522;
-        if ("APPLE TV".equals(key)) return 0xFFB9B9BE;
-        if ("HOICHOI".equals(key)) return 0xFFE8003F;
-        if ("CRUNCHYROLL".equals(key)) return 0xFFF47521;
-        return light() ? 0xFFB8860B : 0xFFFFC857;
+        boolean lt = light();
+        if ("JIOHOTSTAR".equals(key)) return lt ? 0xFF0B63C9 : 0xFF4FB3FF;
+        if ("NETFLIX".equals(key)) return lt ? 0xFFC40812 : 0xFFFF6B6B;
+        if ("PRIME VIDEO".equals(key)) return lt ? 0xFF00709E : 0xFF3FC0EE;
+        if ("ZEE5".equals(key)) return lt ? 0xFF6B2FB3 : 0xFFB07CFF;
+        if ("SONYLIV".equals(key)) return lt ? 0xFFC7472A : 0xFFFF7A5C;
+        if ("MX PLAYER".equals(key)) return lt ? 0xFFB35A00 : 0xFFFF8A4C;
+        if ("APPLE TV".equals(key)) return lt ? 0xFF2F3238 : 0xFFE9E9F0;
+        if ("HOICHOI".equals(key)) return lt ? 0xFFC1002F : 0xFFFF5C7A;
+        if ("CRUNCHYROLL".equals(key)) return lt ? 0xFFB04E00 : 0xFFFF9A4D;
+        return lt ? 0xFF8A5D00 : 0xFFFFC857;
     }
 
     /** The app packages that can play a service, from WatchThese.PROVIDERS. */
@@ -2955,7 +3113,8 @@ public class OverlayController {
 
         TextView title = new TextView(vCtx);
         title.setText(p.title);
-        title.setTextSize(23);
+        // Same constant as the watching rows: one size, one place to change it.
+        title.setTextSize(TITLE_SP);
         title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
         title.setTextColor(txt());
         title.setSingleLine(true);
@@ -2981,7 +3140,11 @@ public class OverlayController {
             rating = Double.parseDouble(p.imdb);
         } catch (Exception ignored) {
         }
-        int gold = light() ? 0xFFB8860B : 0xFFFFC857;
+        // Two golds, because they do different jobs. The solid badge keeps a bright
+        // fill with dark text (readable on both cards); the outlined badge needs a
+        // darker ink on white, where #B8860B was only ~3.4:1.
+        int goldInk = light() ? 0xFF7A5200 : 0xFFFFC857;
+        int goldFill = light() ? 0xFFE0A800 : 0xFFFFC857;
 
         LinearLayout rail = new LinearLayout(vCtx);
         rail.setOrientation(LinearLayout.VERTICAL);
@@ -2995,11 +3158,11 @@ public class OverlayController {
         score.setGravity(Gravity.CENTER);
         score.setPadding(14, 5, 14, 5);
         if (rating >= 8.5) {
-            score.setBackground(rounded(gold, 10, 0));
+            score.setBackground(rounded(goldFill, 10, 0));
             score.setTextColor(0xFF14192B);
         } else if (rating >= 8.0) {
-            score.setBackground(rounded(light() ? 0x22B8860B : 0x33FFC857, 10, gold));
-            score.setTextColor(gold);
+            score.setBackground(rounded(alpha(goldInk, light() ? 0x1F : 0x33), 10, goldInk));
+            score.setTextColor(goldInk);
         } else {
             score.setBackground(rounded(0, 10, light() ? 0x3314192B : 0x33FFFFFF));
             score.setTextColor(dim());
@@ -3009,7 +3172,7 @@ public class OverlayController {
         final TextView watch = new TextView(vCtx);
         watch.setText(vInstallMode ? "INSTALL  \u25B8" : "\u25B6  " + p.provider);
         watch.setTextSize(11);
-        watch.setLetterSpacing(0.10f);
+        watch.setLetterSpacing(0.04f);
         watch.setTypeface(Typeface.DEFAULT_BOLD);
         watch.setTextColor(vInstallMode ? (light() ? 0xFFB8860B : 0xFFFFC857) : accent());
         watch.setGravity(Gravity.END);
@@ -3027,7 +3190,7 @@ public class OverlayController {
                     return;
                 }
                 Log.i(TAG, "watch these: " + p.title + " on " + p.provider);
-                if (openShow(p.url, p.provider)) dismiss(false);
+                if (openShow(p.url, p.provider, p.deeplink)) dismiss(false);
             }
         });
         row.setOnFocusChangeListener(new View.OnFocusChangeListener() {
@@ -3074,6 +3237,13 @@ public class OverlayController {
         String[] pkgs = packagesFor(provider);
         if (pkgs.length == 0) return false;
         String id = pkgs[0];
+        // A market:// intent "succeeds" even when the store is a headless stub, which
+        // is how pressing OK used to do nothing at all. Check the store opens first.
+        if (!canLaunch("com.android.vending")) {
+            notice("No Play Store on this TV. Install " + pretty(provider)
+                    + " from a phone or another device.");
+            return false;
+        }
         try {
             android.content.Intent i = new android.content.Intent(
                     android.content.Intent.ACTION_VIEW,
@@ -3098,13 +3268,13 @@ public class OverlayController {
     }
 
     /** Open a JioHotstar show page; the system routes hotstar.com to the app. */
-    static boolean openShow(String url, String provider) {
+    static boolean openShow(String url, String provider, String deeplink) {
         // Without the app the link falls to a browser, which then asks you to sign in
         // to a site - say what happened instead of pretending it opened.
         String pkg = null;
         String[] pkgs = packagesFor(provider);
         for (String candidate : pkgs) {
-            if (installed(candidate)) {
+            if (canLaunch(candidate)) {
                 pkg = candidate;
                 break;
             }
@@ -3114,8 +3284,24 @@ public class OverlayController {
             return false;
         }
         try {
-            android.content.Intent i = new android.content.Intent(
-                    android.content.Intent.ACTION_VIEW, Uri.parse(url));
+            android.content.Intent i;
+            if (deeplink != null && !deeplink.isEmpty()) {
+                // The catalogue's own Android TV intent: it names the package, the
+                // launch flags and the watch path, and it is what actually lands on
+                // the title. A plain https link only brings the app forward.
+                i = android.content.Intent.parseUri(deeplink,
+                        android.content.Intent.URI_INTENT_SCHEME);
+                if (i == null) throw new IllegalArgumentException("bad deeplink");
+                Log.i(TAG, "open " + provider + " via tv deeplink -> " + deeplink);
+            } else {
+                i = new android.content.Intent(
+                        android.content.Intent.ACTION_VIEW,
+                        Uri.parse(deepLink(provider, url)));
+                // Named package, not "whatever claims netflix.com": this TV also has a
+                // browser that accepts https links, and it was winning them.
+                if (pkg != null) i.setPackage(pkg);
+                Log.i(TAG, "open " + provider + " -> " + deepLink(provider, url));
+            }
             i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK);
             vCtx.startActivity(i);
             return true;
@@ -3124,6 +3310,21 @@ public class OverlayController {
             notice("Could not open " + pretty(provider) + " for this title.");
             return false;
         }
+    }
+
+    /**
+     * The URL an app actually understands.
+     *
+     * Netflix's TV build accepts the plain web URL and the title path opens the details
+     * page; its {@code nflx://} scheme is undocumented and some builds drop it, so the
+     * https form is what we send. `/watch/<id>` would start playback outright, but
+     * JustWatch publishes title ids, not video ids.
+     *
+     * The remaining caveat is Netflix's own: on a cold start with no profile chosen, the
+     * profile picker can swallow the incoming link and the app lands on Home.
+     */
+    static String deepLink(String provider, String url) {
+        return url;
     }
 
     // ---------------------------------------------------------------- stats
@@ -3147,6 +3348,7 @@ public class OverlayController {
                 int n = 0;
                 for (Watcher.Item it : all) {
                     if (n++ >= 20) break;
+                    if (!wantsRatings(it)) continue;
                     Ratings.Info i = cache.get(it.title);
                     if (i == null) {
                         i = Ratings.lookup(vCtx, it.title, kindOf(it));
@@ -3282,7 +3484,7 @@ public class OverlayController {
         TextView l = new TextView(vCtx);
         l.setText(label);
         l.setTextSize(11);
-        l.setLetterSpacing(0.18f);
+        l.setLetterSpacing(0.06f);
         l.setTextColor(dim2());
         box.addView(l);
 
@@ -3320,19 +3522,53 @@ public class OverlayController {
         menuFocus = MENU_WATCHING;
         menuSwipe = true;
         menuReturnTab = tab;
-        tab = TAB_MENU;
-        chrome();
-        buildTab();
-        Log.i(TAG, "menu open from tab " + menuReturnTab);
+        // Remember the exact view, not just the tab: closing the menu used to drop the
+        // cursor on the first row, so the next DOWN press opened a title instead of
+        // moving to the next service.
+        menuReturnFocus = root.findFocus();
+        // No tab switch: the flyout is drawn over the pane that is already there.
+        buildMenu();
+        Log.i(TAG, "menu open over tab " + tab);
     }
 
     static void closeMenu() {
         if (!menuOpen) return;
         menuOpen = false;
-        tab = menuReturnTab;
-        chrome();
-        buildTab();
-        Log.i(TAG, "menu closed -> tab " + tab);
+        dropMenuPanel();
+        View back = menuReturnFocus;
+        menuReturnFocus = null;
+        if (back != null && back.isShown() && back.isFocusable()) {
+            back.requestFocus();
+            Log.i(TAG, "menu closed, focus restored");
+            return;
+        }
+        focusTabContent();
+        Log.i(TAG, "menu closed, tab " + tab);
+    }
+
+    /** Fallback when the view that opened the menu is gone. */
+    static void focusTabContent() {
+        if (tab == TAB_THESE && vTheseList != null) {
+            for (int i = 0; i < vTheseList.getChildCount(); i++) {
+                if (vTheseList.getChildAt(i).isFocusable()) {
+                    vTheseList.getChildAt(i).requestFocus();
+                    return;
+                }
+            }
+            focusRail();
+            return;
+        }
+        for (int i = 0; i < vList.getChildCount(); i++) {
+            if (vList.getChildAt(i).isFocusable()) {
+                vList.getChildAt(i).requestFocus();
+                return;
+            }
+        }
+    }
+
+    static void dropMenuPanel() {
+        if (vMenuPanel != null && vBody != null) vBody.removeView(vMenuPanel);
+        vMenuPanel = null;
     }
 
     static final int MENU_WATCHING = 0, MENU_THESE = 1, MENU_STATS = 2, MENU_SETTINGS = 3,
@@ -3346,7 +3582,7 @@ public class OverlayController {
      * No scrim behind it: the card stays legible, which is the point of a flyout.
      */
     static void buildMenu() {
-        clearList();
+        dropMenuPanel();
         MENU_ROWS.clear();
 
         LinearLayout panel = new LinearLayout(vCtx);
@@ -3379,16 +3615,18 @@ public class OverlayController {
         // Shorter than the pane and pushed down off the tab row: at full height it butted
         // against the tabs, which read as a layout mistake rather than a flyout. Height
         // comes from the content, so the last two rows are never clipped.
-        int pane = vScroll != null && vScroll.getHeight() > 0 ? vScroll.getHeight() : dp(560);
-        LinearLayout.LayoutParams plp = new LinearLayout.LayoutParams(
-                dp(186), ViewGroup.LayoutParams.WRAP_CONTENT);
+        int pane = vBody != null && vBody.getHeight() > 0 ? vBody.getHeight() : dp(560);
+        android.widget.FrameLayout.LayoutParams plp =
+                new android.widget.FrameLayout.LayoutParams(
+                        dp(186), ViewGroup.LayoutParams.WRAP_CONTENT);
         plp.topMargin = (int) (pane * 0.15f);
-        vList.addView(panel, plp);
+        vBody.addView(panel, plp);
+        vMenuPanel = panel;
 
         TextView title = new TextView(vCtx);
         title.setText("MENU");
         title.setTextSize(10);
-        title.setLetterSpacing(0.22f);
+        title.setLetterSpacing(0.08f);
         title.setTypeface(Typeface.DEFAULT_BOLD);
         title.setTextColor(0x99FFFFFF);
         title.setPadding(10, 0, 10, 10);
@@ -3429,7 +3667,6 @@ public class OverlayController {
             panel.setAlpha(1f);
         }
 
-        maybeScrollTop();
         View want = MENU_ROWS.get(menuFocus);
         if (want != null) want.requestFocus();
         else if (panel.getChildCount() > 1) panel.getChildAt(1).requestFocus();
@@ -3497,16 +3734,17 @@ public class OverlayController {
     static void performMenu(int what) {
         menuFocus = what;
         switch (what) {
-            case MENU_WATCHING: menuOpen = false; tab = TAB_WATCHING; break;
-            case MENU_THESE: menuOpen = false; tab = TAB_THESE; break;
-            case MENU_STATS: menuOpen = false; tab = TAB_STATS; break;
-            case MENU_SETTINGS: menuOpen = false; tab = TAB_SETTINGS; break;
+            case MENU_WATCHING: closeMenu(); tab = TAB_WATCHING; break;
+            case MENU_THESE: closeMenu(); tab = TAB_THESE; break;
+            case MENU_STATS: closeMenu(); tab = TAB_STATS; break;
+            case MENU_SETTINGS: closeMenu(); tab = TAB_SETTINGS; break;
             case MENU_SORT: sortMode = sortMode == 0 ? 1 : 0; prefSet(); break;
             case MENU_LAYOUT: layoutMode = layoutMode == 0 ? 1 : 0; prefSet(); break;
             case MENU_THEME:
                 // Come back into the menu, not to WATCHING: the card is rebuilt for the
                 // theme, and the menu is where the press happened.
-                bootTab = TAB_MENU;
+                menuAfterBoot = true;
+                bootTab = tab;
                 setLight(!light());
                 return;
             case MENU_CLEAR:
@@ -3953,6 +4191,7 @@ public class OverlayController {
     static void sortByRating(List<Watcher.Item> rows) {
         {
             for (Watcher.Item it : rows) {
+                if (!wantsRatings(it)) continue;
                 if (cache.containsKey(it.title)) continue;
                 Ratings.Info i = Ratings.lookup(vCtx, it.title, kindOf(it));
                 if (i != null) cache.put(it.title, i);

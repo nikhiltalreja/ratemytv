@@ -48,7 +48,7 @@ public class WatchThese {
     static final String ENDPOINT = "https://apis.justwatch.com/graphql";
     static final String PREFS = "watchthese";
     /** Bump when the join rules change, so an old list cannot outlive them. */
-    static final String V = "6";
+    static final String V = "8";
     static final String KEY = "list" + V;
     static final String STAMP = "at" + V;
     static final String RETRY = "retryAt" + V;
@@ -73,24 +73,23 @@ public class WatchThese {
     static final long RETRY_MS = 15L * 60 * 1000;
 
     /**
-     * The services the panel lists, in display order: the global ones first, then what
-     * India actually watches. Columns are JustWatch's package name, the panel's label,
-     * and the app packages that play it ("|" when the phone and TV apps differ).
+     * The services the panel lists, in display order. Columns are JustWatch's package
+     * name, the panel's label, and the app packages that play it ("|" when the phone
+     * and TV apps differ).
      *
      * JustWatch's reseller packages ("Amazon Prime Video with Ads", "SonyLIV Amazon
      * Channel", "Apple TV Amazon Channel") are deliberately absent: they are the same
      * catalogue reached through Amazon, not a separate place to watch.
      *
-     * Aha, Sun NXT, ETV Win and ManoramaMAX are not listed because JustWatch carries no
-     * offers for them in this catalogue — there is nothing to join against.
+     * SonyLIV and MX Player were removed on request. Aha, Sun NXT, ETV Win and
+     * ManoramaMAX are not listed because JustWatch carries no offers for them in this
+     * catalogue — there is nothing to join against.
      */
     static final String[][] PROVIDERS = {
             {"JioHotstar", "JIOHOTSTAR", "in.startv.hotstar"},
             {"Netflix", "NETFLIX", "com.netflix.ninja"},
             {"Amazon Prime Video", "PRIME VIDEO", "com.amazon.amazonvideo.livingroom"},
             {"Zee5", "ZEE5", "com.zee5.hipi"},
-            {"Sony Liv", "SONYLIV", "com.sonyliv"},
-            {"Amazon MX Player", "MX PLAYER", "com.mxtech.videoplayer.television|com.mxtech.videoplayer.ad"},
             {"Apple TV", "APPLE TV", "com.apple.atve.androidtv.appletv"},
             {"Hoichoi", "HOICHOI", "com.hoichoi"},
             {"Crunchyroll", "CRUNCHYROLL", "com.crunchyroll.crunchyroid"},
@@ -104,7 +103,8 @@ public class WatchThese {
             + " title originalReleaseYear genres { translation(language: $language) }"
             + " scoring { imdbScore imdbVotes } }"
             + " offers(country: $country, platform: WEB) {"
-            + " package { clearName } standardWebURL } } } } }";
+            + " package { clearName } standardWebURL"
+            + " deeplinkURL(platform: ANDROID_TV) } } } } }";
 
     /**
      * Pages of 100 to ask for. The Testaments sits around #200-300 of the 2026
@@ -125,14 +125,31 @@ public class WatchThese {
         /** Display name of the service, from {@link #PROVIDERS}. */
         final String provider;
         final String url;
+        /**
+         * The service's own Android TV intent URI, when the catalogue has one:
+         * {@code intent://www.netflix.com/watch/<id>#Intent;package=com.netflix.ninja…}.
+         * This is what actually lands on the title - the web URL only brings the app
+         * forward.
+         */
+        final String deeplink;
 
         Pick(String title, String imdb, long votes, String genres, int year,
              String provider, String url) {
-            this(title, imdb, votes, genres, year, 0, provider, url);
+            this(title, imdb, votes, genres, year, 0, provider, url, null);
+        }
+
+        Pick(String title, String imdb, long votes, String genres, int year,
+             String provider, String url, String deeplink) {
+            this(title, imdb, votes, genres, year, 0, provider, url, deeplink);
         }
 
         Pick(String title, String imdb, long votes, String genres, int year, int season,
              String provider, String url) {
+            this(title, imdb, votes, genres, year, season, provider, url, null);
+        }
+
+        Pick(String title, String imdb, long votes, String genres, int year, int season,
+             String provider, String url, String deeplink) {
             this.title = title;
             this.imdb = imdb;
             this.votes = votes;
@@ -141,6 +158,7 @@ public class WatchThese {
             this.season = season;
             this.provider = provider;
             this.url = url;
+            this.deeplink = deeplink;
         }
 
         String votesText() {
@@ -180,6 +198,7 @@ public class WatchThese {
                 o.put("y", p.year);
                 o.put("p", p.provider);
                 o.put("u", p.url);
+                if (p.deeplink != null) o.put("d", p.deeplink);
                 arr.put(o);
             } catch (Exception ignored) {
             }
@@ -201,7 +220,7 @@ public class WatchThese {
             if (t.isEmpty() || u.isEmpty()) continue;
             out.add(new Pick(t, o.optString("r", "?"), o.optLong("v", 0),
                     o.optString("g", ""), o.optInt("y", 2026),
-                    o.optString("p", "JIOHOTSTAR"), u));
+                    o.optString("p", "JIOHOTSTAR"), u, o.optString("d", null)));
         }
         return out;
     }
@@ -337,7 +356,7 @@ public class WatchThese {
                 if (dup) continue;
                 out.add(new Pick(title, String.format(Locale.US, "%.1f", rating), votes,
                         genres, content.optInt("originalReleaseYear", 2026),
-                        offer[0], offer[1]));
+                        offer[0], offer[1], offer[2]));
             }
         } catch (Exception e) {
             Log.w(TAG, "collect: " + e);
@@ -345,9 +364,9 @@ public class WatchThese {
     }
 
     /**
-     * The best offer for one of our four services: {display name, watch URL}, or null.
-     * Priority is the order in PROVIDERS, so a title on both JioHotstar and Netflix is
-     * listed once, on the service this app is built for.
+     * The best offer for one of our services: {display, web URL, TV deeplink}. Priority
+     * is the order in PROVIDERS, so a title on both JioHotstar and Netflix is listed
+     * once, on the service this app is built for. The deeplink may be null.
      */
     static String[] offerFor(JSONArray offers) {
         if (offers == null) return null;
@@ -360,7 +379,8 @@ public class WatchThese {
                 if (!prov[0].equalsIgnoreCase(pkg.optString("clearName", ""))) continue;
                 String url = o.optString("standardWebURL", "");
                 if (url.isEmpty()) continue;
-                return new String[]{prov[1], url};
+                String deep = o.optString("deeplinkURL", "");
+                return new String[]{prov[1], url, deep.isEmpty() ? null : deep};
             }
         }
         return null;

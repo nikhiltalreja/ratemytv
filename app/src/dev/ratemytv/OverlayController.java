@@ -87,6 +87,8 @@ public class OverlayController {
     static int infoAnchorRow = -1;
     /** Dims the page while the detail panel is over it. */
     static View vInfoScrim;
+    /** Dim behind the LEFT menu so it reads as a layer over the list. */
+    static View vMenuScrim;
     /**
      * Keys are delivered twice (down, up). A close runs on the down, focus moves back to
      * the row, and the up then arrives at the row and moves again - one press, two
@@ -4325,8 +4327,24 @@ public class OverlayController {
     }
 
     static void dropMenuPanel() {
+        // Fade the scrim out with the panel, then take both off the tree.
+        if (vMenuScrim != null) {
+            vMenuScrim.animate().cancel();
+            vMenuScrim.animate().alpha(0f).setDuration(140).start();
+        }
         if (vMenuPanel != null && vBody != null) vBody.removeView(vMenuPanel);
         vMenuPanel = null;
+        final View scrim = vMenuScrim;
+        if (scrim != null && vBody != null) {
+            vBody.postDelayed(new Runnable() {
+                public void run() {
+                    // Only after the fade, and only if a new menu did not put it back.
+                    if (vMenuScrim == scrim && vMenuPanel == null && vBody != null) {
+                        vBody.removeView(scrim);
+                    }
+                }
+            }, 160);
+        }
     }
 
     static final int MENU_WATCHING = 0, MENU_THESE = 1, MENU_STATS = 2, MENU_SETTINGS = 3,
@@ -4378,8 +4396,32 @@ public class OverlayController {
                 new android.widget.FrameLayout.LayoutParams(
                         dp(186), ViewGroup.LayoutParams.WRAP_CONTENT);
         plp.topMargin = (int) (pane * 0.15f);
+        // Lightbox, the same way the info panel does it: dim what is behind so the
+        // menu reads as a layer over the list instead of merging into it. The scrim is
+        // below the panel, never focusable, and does not take the D-pad.
+        if (vMenuScrim == null) {
+            vMenuScrim = new View(vCtx);
+            vMenuScrim.setFocusable(false);
+            vMenuScrim.setClickable(true);
+            vMenuScrim.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    closeMenu();
+                }
+            });
+        }
+        if (vMenuScrim.getParent() == null) {
+            vBody.addView(vMenuScrim, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        vBody.bringChildToFront(vMenuScrim);
+
         vBody.addView(panel, plp);
+        vBody.bringChildToFront(panel);
         vMenuPanel = panel;
+
+        vMenuScrim.setAlpha(0f);
+        vMenuScrim.animate().alpha(light() ? 0.32f : 0.48f).setDuration(180).start();
 
         TextView title = new TextView(vCtx);
         title.setText("MENU");

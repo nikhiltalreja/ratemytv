@@ -617,25 +617,89 @@ public class Watcher extends NotificationListenerService {
             }
             for (String k : drop) all.remove(k);
 
-            // One row per series, and it must not go backwards: re-watching an older
-            // episode (or a stray tap on an older deeplink) used to overwrite the badge
-            // and position of the newest one, which read as "my latest episode vanished".
+            // One row per series. Going back to an older episode is legitimate - you
+            // rewatched it, or your wife is catching up - so it is accepted; what is
+            // refused is a *barely started* older episode replacing real progress on a
+            // newer one, which was the original complaint (a stray deeplink tap).
             org.json.JSONObject prev = all.optJSONObject(title);
             if (prev != null && ep != null) {
                 String prevEp = prev.optString("ep");
-                if (!prevEp.isEmpty() && compareEp(ep, prevEp) < 0) {
+                long prevPos = prev.optLong("pos", 0);
+                if (!prevEp.isEmpty() && compareEp(ep, prevEp) < 0 && pos < 30000 && prevPos > 60000) {
                     prev.put("ts", System.currentTimeMillis());
                     all.put(title, prev);
                     p.edit().putString("local2", all.toString()).apply();
-                    Log.i(TAG, "kept " + title + " at " + prevEp + " (played " + ep + ")");
+                    Log.i(TAG, "kept " + title + " at " + prevEp + " (barely started " + ep + ")");
+                    pruneLocal(c, all);
                     return;
                 }
             }
 
             all.put(title, o);
             p.edit().putString("local2", all.toString()).apply();
+            pruneLocal(c, all);
         } catch (Exception e) {
             Log.w(TAG, "saveLocal: " + e);
+        }
+    }
+
+    /**
+     * How long a title is remembered.
+     *
+     * Nothing used to expire: a record stayed until it was cleared by hand. That is
+     * wrong in both directions - the list grows for years, and the one row somebody
+     * actually wants ("my wife has not watched it yet") is buried.
+     *
+     * The rule, deliberately generous because losing history is worse than a long list:
+     *   - keep anything watched in the last KEEP_DAYS days
+     *   - always keep the newest KEEP_MIN newest titles, however old
+     *   - never drop a bookmarked title
+     *   - never drop something part-watched (it is somebody's unfinished episode)
+     */
+    static final int KEEP_DAYS = 30;
+    static final int KEEP_MIN = 40;
+
+    static int pruneLocal(Context c, org.json.JSONObject all) {
+        try {
+            long cutoff = System.currentTimeMillis() - KEEP_DAYS * 24L * 3600 * 1000;
+            java.util.Set<String> starred = new java.util.HashSet<>(Bookmarks.titles(c));
+
+            // Newest first, so the first KEEP_MIN survive whatever their age.
+            java.util.List<String> keys = new java.util.ArrayList<>();
+            java.util.Iterator<String> it = all.keys();
+            while (it.hasNext()) keys.add(it.next());
+            java.util.Collections.sort(keys, new java.util.Comparator<String>() {
+                public int compare(String a, String b) {
+                    return Long.compare(all.optJSONObject(b).optLong("ts", 0),
+                            all.optJSONObject(a).optLong("ts", 0));
+                }
+            });
+
+            java.util.List<String> drop = new java.util.ArrayList<>();
+            for (int i = 0; i < keys.size(); i++) {
+                String k = keys.get(i);
+                if (i < KEEP_MIN) continue;
+                org.json.JSONObject o = all.optJSONObject(k);
+                if (o == null) continue;
+                if (o.optLong("ts", 0) > cutoff) continue;
+                if (starred.contains(k) || starred.contains(o.optString("title"))) continue;
+                long pos = o.optLong("pos", 0);
+                long dur = o.optLong("dur", 0);
+                boolean started = pos > 0 && (dur <= 0 || pos < dur * 0.95);
+                if (started) continue;
+                drop.add(k);
+            }
+            for (String k : drop) all.remove(k);
+            if (!drop.isEmpty()) {
+                c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                        .putString("local2", all.toString()).apply();
+                Log.i(TAG, "retention: dropped " + drop.size() + " titles older than "
+                        + KEEP_DAYS + " days");
+            }
+            return drop.size();
+        } catch (Exception e) {
+            Log.w(TAG, "pruneLocal: " + e);
+            return 0;
         }
     }
 

@@ -1500,7 +1500,10 @@ public class OverlayController {
 
         LinearLayout body = new LinearLayout(vCtx);
         body.setOrientation(LinearLayout.VERTICAL);
-        body.setPadding(22, dp(1), 0, 0);
+        // 21 dp on the right, matching what the action rail gave up: the title and the
+        // score keep their old width and the freed space reads as air before the pill,
+        // instead of the text sliding right to fill it.
+        body.setPadding(22, dp(1), dp(21), 0);
         row.addView(body, new LinearLayout.LayoutParams(
                 0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
 
@@ -2310,7 +2313,7 @@ public class OverlayController {
         // 12 above, 16 below: the bevel's face ends 4 dp above the view's bottom (the lip
         // occupies that space), so its optical centre sits ~2 dp above the geometric one.
         // Even padding put the label visibly low on the key.
-        t.setPadding(16, 12, 16, 16);
+        t.setPadding(16, 11, 16, 17);
 
         // A beveled key, not a flat ring: bright top edge, the face falling to a darker
         // bottom, and a lip underneath. One instance per pill, because a Drawable carries

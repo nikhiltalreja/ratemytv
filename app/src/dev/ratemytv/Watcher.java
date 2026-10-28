@@ -605,17 +605,32 @@ public class Watcher extends NotificationListenerService {
             // Both ids are needed to rebuild hotstar://in/shows/<slug>/<showId>/x/<epId>/watch
             // once a slug is known, so neither may be dropped.
             if (episodeId != null && !episodeId.isEmpty()) o.put("epid", episodeId);
-            // Same episode, recorded earlier under its label ("S2 E4 …"): drop that key,
-            // otherwise the list keeps a duplicate nobody can rate.
+            // One row per series, keyed by show id.
+            //
+            // A record saved before the title resolved is keyed by its episode label
+            // ("S1 E2 Crosby, Stills, and Nash"); localRows maps that back to "Phony"
+            // for display, so the list showed TWO Phony rows - E01 and E02 - and the
+            // episode that was actually being watched sat in the row nobody could see.
+            // The show id is the same on both, so every other key carrying it goes.
             java.util.List<String> drop = new java.util.ArrayList<>();
+            String sid = o.optString("sid");
             java.util.Iterator<String> keys = all.keys();
             while (keys.hasNext()) {
                 String k = keys.next();
+                if (k.equals(title)) continue;
                 if (episode != null && !episode.equals(title) && k.equalsIgnoreCase(episode)) {
                     drop.add(k);
+                    continue;
+                }
+                if (!sid.isEmpty()) {
+                    org.json.JSONObject other = all.optJSONObject(k);
+                    if (other != null && sid.equals(other.optString("sid"))) drop.add(k);
                 }
             }
-            for (String k : drop) all.remove(k);
+            for (String k : drop) {
+                all.remove(k);
+                Log.i(TAG, "folded duplicate key into " + title + ": " + k);
+            }
 
             // One row per series. Going back to an older episode is legitimate - you
             // rewatched it, or your wife is catching up - so it is accepted; what is

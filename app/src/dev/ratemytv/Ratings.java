@@ -179,6 +179,23 @@ public class Ratings {
             }
             return i;
         }
+        // Before OMDb: the Watch These pass already mined this title's score, votes,
+        // year, genres and art on first run. Answering from that index is what lets the
+        // card work with no OMDb key at all - OMDb becomes the fallback for what the
+        // catalogue did not cover (regional titles, mostly).
+        WatchThese.Pick mined = WatchThese.find(c, title);
+        if (mined != null && mined.imdb != null && !mined.imdb.isEmpty()) {
+            Info fromList = new Info();
+            fromList.imdb = mined.imdb;
+            if (mined.votes > 0) fromList.imdbVotes = votes(String.valueOf(mined.votes));
+            if (mined.year > 0) fromList.year = String.valueOf(mined.year);
+            if (mined.genres != null) fromList.genre = mined.genres.replace("|", ", ");
+            if (mined.poster != null) fromList.poster = mined.poster;
+            fromList.type = wantType;
+            remember(c, title, wantType, fromList);
+            Log.i(TAG, "mined: " + title + " -> " + mined.imdb + " (no key needed)");
+            return fromList;
+        }
         if (!knownMiss(c, title, wantType)) {
             String k = key(c);
             if (k != null) {

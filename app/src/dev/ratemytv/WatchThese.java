@@ -224,6 +224,35 @@ public class WatchThese {
         }
     }
 
+    // Normalised title -> pick, so a row lookup is a map hit rather than a parse of the
+    // whole list. Rebuilt only when the stored list changes, because its stamp moves.
+    private static java.util.Map<String, Pick> index;
+    private static long indexAt = -1;
+
+    /**
+     * The mined pick for a title, or null.
+     *
+     * This is what lets the card answer a row without OMDb: a couple of hundred titles
+     * are mined on first run, and watching one of them should never touch the network.
+     */
+    static Pick find(Context c, String title) {
+        if (title == null) return null;
+        try {
+            long at = cachedAt(c);
+            if (index == null || at != indexAt) {
+                java.util.Map<String, Pick> m = new java.util.HashMap<>();
+                for (Pick p : cached(c)) {
+                    if (p != null && p.title != null) m.put(Ratings.norm(p.title), p);
+                }
+                index = m;
+                indexAt = at;
+            }
+            return index.get(Ratings.norm(title));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     static long cachedAt(Context c) {
         return c.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(STAMP, 0);
     }

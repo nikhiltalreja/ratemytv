@@ -190,10 +190,14 @@ with The Bear's IMDb score.
 ![Long-press the remote while The Bear plays; the card opens with its IMDb score](docs/demo-overlay.gif)
 
 **Your IMDb, connected to the apps installed on your TV.**
-Watch These joins the ratings to what each installed service actually carries. Choose a
-pick; the service opens, then the title.
+Watch These joins the ratings to what each installed service actually carries. Right on a
+pick opens its panel — score, votes, synopsis, cast — over a dimmed list; right again
+opens the service.
 
-![Watch These: choose a pick; the splash opens, then the title](docs/demo-watch-these.gif?v=2)
+![The Pitt: its panel over the dimmed list, then the service opening on it](docs/demo-watch-these.gif?v=3)
+
+The panel is a layer, not a page: the rail and the picks stay visible behind it, dimmed
+so the panel reads as the thing you are looking at.
 
 **Instant switching (ALT+TAB).**
 The Bear is playing; open the card on Mobland and press RESUME, then ALT+TAB to bring

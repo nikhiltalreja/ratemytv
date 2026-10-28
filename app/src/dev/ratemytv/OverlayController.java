@@ -3517,6 +3517,9 @@ public class OverlayController {
         // replacement for it. The scrim is not focusable and never takes the cursor.
         if (vInfoScrim == null) {
             vInfoScrim = new View(vCtx);
+            // Without a colour this is a transparent view: the alpha animation ran, the
+            // panel still merged into the list behind it, and nothing dimmed at all.
+            vInfoScrim.setBackgroundColor(0xFF000000);
             vInfoScrim.setFocusable(false);
             vInfoScrim.setClickable(true);
             vInfoScrim.setOnClickListener(new View.OnClickListener() {
@@ -3539,7 +3542,7 @@ public class OverlayController {
             vBody.bringChildToFront(vInfoPanel);
         }
         vInfoScrim.setAlpha(0f);
-        vInfoScrim.animate().alpha(light() ? 0.38f : 0.55f).setDuration(200).start();
+        vInfoScrim.animate().alpha(light() ? 0.45f : 0.62f).setDuration(200).start();
         vInfoPanel.setTranslationX(width);
         vInfoPanel.animate().translationX(0f).setDuration(220)
                 .setInterpolator(new android.view.animation.DecelerateInterpolator())
@@ -4410,6 +4413,7 @@ public class OverlayController {
         // below the panel, never focusable, and does not take the D-pad.
         if (vMenuScrim == null) {
             vMenuScrim = new View(vCtx);
+            vMenuScrim.setBackgroundColor(0xFF000000);
             vMenuScrim.setFocusable(false);
             vMenuScrim.setClickable(true);
             vMenuScrim.setOnClickListener(new View.OnClickListener() {
@@ -4430,7 +4434,7 @@ public class OverlayController {
         vMenuPanel = panel;
 
         vMenuScrim.setAlpha(0f);
-        vMenuScrim.animate().alpha(light() ? 0.32f : 0.48f).setDuration(180).start();
+        vMenuScrim.animate().alpha(light() ? 0.40f : 0.55f).setDuration(180).start();
 
         TextView title = new TextView(vCtx);
         title.setText("MENU");

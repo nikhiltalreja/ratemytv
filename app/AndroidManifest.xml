@@ -67,6 +67,17 @@
             </intent-filter>
         </receiver>
 
+        <!-- Watch These: a newly installed service should light up without a restart.
+             A runtime receiver with the same filter never fires on this TV. -->
+        <receiver android:name=".InstallWatch" android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.PACKAGE_ADDED" />
+                <action android:name="android.intent.action.PACKAGE_REMOVED" />
+                <action android:name="android.intent.action.PACKAGE_REPLACED" />
+                <data android:scheme="package" />
+            </intent-filter>
+        </receiver>
+
         <service android:name=".Watcher"
             android:exported="true"
             android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">

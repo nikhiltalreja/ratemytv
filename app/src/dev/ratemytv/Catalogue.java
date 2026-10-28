@@ -234,8 +234,7 @@ public class Catalogue {
             conn.setReadTimeout(9000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("User-Agent", "RateMyTV/1.0");
+            Http.graphql(conn);
             OutputStream out = conn.getOutputStream();
             out.write(payload.toString().getBytes("UTF-8"));
             out.close();

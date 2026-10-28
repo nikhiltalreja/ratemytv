@@ -73,6 +73,26 @@ public class OverlayController {
     static ScrollView vTheseScroll, vRailScroll;
     static TextView vRailFoot;
     static TextView vPaneTitle;
+    /** The detail panel that slides in from the right over the two-pane body. */
+    static LinearLayout vInfoPanel;
+    static boolean infoOpen;
+    static WatchThese.Pick infoPick;
+    /** Rows built before yielding: enough to fill the pane's viewport on a 4K TV. */
+    static final int FIRST_PAINT_ROWS = 14;
+    /** Bumped on every sheet switch, so a queued remainder cannot land on the new one. */
+    static int sheetGen;
+    /** The row that opened the panel: focus goes back there, nowhere else. */
+    static View infoAnchor;
+    /** Row index in the pane, so a refresh that rebuilds the rows cannot orphan it. */
+    static int infoAnchorRow = -1;
+    /** Dims the page while the detail panel is over it. */
+    static View vInfoScrim;
+    /**
+     * Keys are delivered twice (down, up). A close runs on the down, focus moves back to
+     * the row, and the up then arrives at the row and moves again - one press, two
+     * steps. Everything for a moment after a close is swallowed.
+     */
+    static long swallowKeysUntil;
     /** Where addPickRow() appends, and which scroller it keeps in view. */
     static ViewGroup vRowSink;
     static ScrollView vRowScroll;
@@ -116,6 +136,51 @@ public class OverlayController {
     static int layoutMode;
 
     static final Map<String, Ratings.Info> cache = new HashMap<>();
+
+    /**
+     * Move what Watch These already knows into the card's ratings map.
+     *
+     * The two tabs were using separate facts: the shelf carried IMDb score, votes,
+     * synopsis, cast, Tomatometer and a poster URL for 222 titles, while WATCHING asked
+     * OMDb for the same things one row at a time. Seeding this map means a title that
+     * appears on both tabs paints with its score, plot and cast instantly — no request,
+     * no "not rated" placeholder that fills in a second later.
+     */
+    static void seedFromThese() {
+        int added = 0;
+        for (WatchThese.Pick p : WatchThese.cached(vCtx)) {
+            if (p.title == null || cache.containsKey(p.title)) continue;
+            Ratings.Info i = new Ratings.Info();
+            i.imdb = p.imdb;
+            i.imdbVotes = String.format(java.util.Locale.US, "%,d", p.votes);
+            i.rt = p.rt == null ? null : p.rt + "%";
+            i.plot = p.synopsis;
+            i.actors = p.cast;
+            i.year = String.valueOf(p.year);
+            i.type = "series";
+            i.poster = p.poster;
+            i.genre = p.genres;
+            cache.put(p.title, i);
+            added++;
+        }
+        if (added > 0) Log.i(TAG, "ratings seeded from Watch These: " + added);
+    }
+
+    /**
+     * Cache lookup that tolerates punctuation drift between the two tabs ("A Knight of
+     * the Seven Kingdoms" vs "A Knight of the Seven Kingdoms "), which otherwise costs
+     * an OMDb round trip for a title the card already knows.
+     */
+    static Ratings.Info lookupCache(String title) {
+        if (title == null) return null;
+        Ratings.Info hit = cache.get(title);
+        if (hit != null) return hit;
+        String k = Ratings.norm(title);
+        for (java.util.Map.Entry<String, Ratings.Info> e : cache.entrySet()) {
+            if (Ratings.norm(e.getKey()).equals(k)) return e.getValue();
+        }
+        return null;
+    }
 
     static class Holder {
         boolean wideFrame;
@@ -222,12 +287,49 @@ public class OverlayController {
             return super.dispatchKeyEventPreIme(e);
         }
 
+        @Override public void onWindowFocusChanged(boolean has) {
+            super.onWindowFocusChanged(has);
+            if (!has) return;
+            // Coming back from the Play Store is the moment an install has landed. A
+            // package broadcast should cover it, but this ROM never delivers those to a
+            // runtime receiver, so compare the launchability signature instead.
+            checkInstalls();
+        }
+
         @Override public boolean dispatchKeyEvent(KeyEvent e) {
+            if (android.os.SystemClock.uptimeMillis() < swallowKeysUntil
+                    && e.getAction() == KeyEvent.ACTION_UP) {
+                int c = e.getKeyCode();
+                // Key codes, not the left()/right() helpers: those match DOWN only,
+                // which is exactly the half that must NOT be swallowed.
+                if (c == KeyEvent.KEYCODE_DPAD_LEFT || c == KeyEvent.KEYCODE_DPAD_RIGHT
+                        || c == KeyEvent.KEYCODE_BACK || c == KeyEvent.KEYCODE_ESCAPE) {
+                    return true;
+                }
+            }
             if (back(e)) {
+                // Layers close outermost first: the detail panel, then the menu, then
+                // the card.
+                if (infoOpen) {
+                    closeInfo();
+                    return true;
+                }
                 // Back closes the menu before it closes the card: the menu is a layer,
                 // and leaving the app from inside it would lose where you were.
                 if (menuOpen) closeMenu();
                 else dismiss(true);
+                return true;
+            }
+            if (infoOpen && right(e)) {
+                // RIGHT is the "go" here: same direction that opened the panel now
+                // commits to it, and LEFT is the way back.
+                final WatchThese.Pick now = infoPick;
+                closeInfo();
+                if (now != null) openFromPick(now);
+                return true;
+            }
+            if (infoOpen && left(e)) {
+                closeInfo();
                 return true;
             }
             if (menuOpen && right(e)) {
@@ -241,14 +343,46 @@ public class OverlayController {
                 }
                 // LEFT walks back one level, then opens the menu:
                 //   collection -> rail -> menu
-                // The collection's own row listener does the first step; everything
-                // else (rail, plain rows, blank space) opens the flyout.
+                //
+                // Handled here rather than only on the row, because focus does not
+                // always sit on a row: at the end of a long list it can rest on the
+                // scroll container, and then the default focus search picked whatever
+                // rail tile happened to be beside it - the symptom being "LEFT from the
+                // last title lands on the last service".
+                if (inThesePaneBody() && !inRail()) {
+                    focusRail();
+                    return true;
+                }
                 if (!onTabRow() && !inTheseCollection()) {
                     openMenu();
                     return true;
                 }
             }
             return super.dispatchKeyEvent(e);
+        }
+
+        /** Focus is anywhere inside the two-pane body, rail or collection. */
+        static boolean inThesePaneBody() {
+            View f = root == null ? null : root.findFocus();
+            View p = f;
+            while (p != null) {
+                if (p == vTheseWrap) return true;
+                if (!(p.getParent() instanceof View)) break;
+                p = (View) p.getParent();
+            }
+            return false;
+        }
+
+        /** Focus is on a service tile in the rail. */
+        static boolean inRail() {
+            View f = root == null ? null : root.findFocus();
+            View p = f;
+            while (p != null) {
+                if (p == vRail) return true;
+                if (!(p.getParent() instanceof View)) break;
+                p = (View) p.getParent();
+            }
+            return false;
         }
 
         /** Focus is on a title row of the WATCH THESE collection. */
@@ -298,7 +432,9 @@ public class OverlayController {
     static GradientDrawable cardBg() {
         GradientDrawable d = new GradientDrawable(
                 GradientDrawable.Orientation.TL_BR,
-                light() ? new int[]{0xF7F7F9FF, 0xF7E7EDFB}
+                // 90% white, not 97%: a TV at full brightness renders near-white as
+                // glare across a dark room, and the rows lose their edge.
+                light() ? new int[]{0xF7EAECF4, 0xF7E1E7F4}
                         : new int[]{0xF21B2440, 0xF22C1638});
         d.setCornerRadius(38);
         d.setStroke(2, light() ? 0x551B63C7 : 0x5AA8C8FF);
@@ -589,7 +725,6 @@ public class OverlayController {
                 0, ViewGroup.LayoutParams.MATCH_PARENT, 1f));
         vBody.addView(vTheseWrap, new android.widget.FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        card.addView(vPaneTitle);
         card.addView(vBody, new LinearLayout.LayoutParams(listW, 0, 1f));
 
         // CREDIT: the @nikhiltalrejasocial footer must stay in every build.
@@ -631,8 +766,12 @@ public class OverlayController {
             Log.w(TAG, "addView: " + e);
             return;
         }
+        primeInstalls();
         card.requestFocus();
 
+        // Both tabs describe the same catalogues: load what the shelf knows into the
+        // ratings map before the first row is built.
+        seedFromThese();
         // A rebuild for a theme change should land back on the tab the user was on;
         // a fresh open always starts on WATCHING.
         tab = bootTab;
@@ -903,9 +1042,11 @@ public class OverlayController {
         lastBuiltTab = tab;
         // WATCH THESE swaps the single scrolling list for its two-pane body.
         boolean twoPane = tab == TAB_THESE;
+        // A detail panel belongs to the tab that opened it: leaving the tab must not
+        // leave a stale panel over the new one.
+        if (!twoPane && infoOpen) closeInfo();
         if (vScroll != null) vScroll.setVisibility(twoPane ? View.GONE : View.VISIBLE);
         if (vTheseWrap != null) vTheseWrap.setVisibility(twoPane ? View.VISIBLE : View.GONE);
-        if (vPaneTitle != null) vPaneTitle.setVisibility(twoPane ? View.VISIBLE : View.GONE);
         if (tab == TAB_WATCHING) {
             // Coming back to a list we built seconds ago: paint it in this frame, then
             // let the worker confirm it. Without this the tab sat on the previous
@@ -1340,7 +1481,9 @@ public class OverlayController {
         row.setOnKeyListener(BACK);
         // 26, not 24: the poster, the title and the RESUME pill now share one top line,
         // and the whole block wanted a couple of pixels of air above it.
-        row.setPadding(34, 26, 34, 24);
+        // 20, not 34: the action column sits ~5% further right than it did, but still
+        // inside the focus ring - at 0 the pill crossed the ring and looked clipped.
+        row.setPadding(34, 26, 20, 24);
         row.setBackground(rounded(rowTint(), 18, stroke()));
 
         h.poster = new ImageView(vCtx);
@@ -1546,7 +1689,7 @@ public class OverlayController {
         // 18 on the right, not 4: the pill fills this rail's width, so its right edge
         // sat 20 px from the row's visible border - tighter than any other gap on the
         // card, and close enough to read as touching the rounded corner.
-        rightCol.setPadding(22, dp(6), 18, 0);
+        rightCol.setPadding(22, dp(6), 2, 0);
         final TextView resume = resumePill(false);
         resumeRef[0] = resume;
         if (row.getId() == View.NO_ID) row.setId(View.generateViewId());
@@ -2087,15 +2230,25 @@ public class OverlayController {
         inner.setCornerRadius(21);
         inner.setStroke(4, mid);
 
-        GradientDrawable body = new GradientDrawable();
-        body.setColor(light() ? 0xF7FFFFFF : 0xF7151F33);
+        // The surface itself is lit from the top, not left flat behind a ring. A flat
+        // fill plus a stroke is exactly the "outline" look; a gradient body with its own
+        // hairline reads as a raised card, and the rings then look like its glow.
+        GradientDrawable body = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
+                light() ? new int[]{0xFFFFFFFF, 0xFFEFF3FA}
+                        : new int[]{0xFF1D2A44, 0xFF131C2E});
         body.setCornerRadius(17);
         body.setStroke(2, edge);
 
+        GradientDrawable sheen = new GradientDrawable();
+        sheen.setColor(0x00000000);
+        sheen.setCornerRadius(14);
+        sheen.setStroke(2, light() ? 0x1A1B2440 : 0x2EFFFFFF);
+
         android.graphics.drawable.LayerDrawable layers = new android.graphics.drawable.LayerDrawable(
-                new android.graphics.drawable.Drawable[]{outer, inner, body});
+                new android.graphics.drawable.Drawable[]{outer, inner, body, sheen});
         layers.setLayerInset(1, 3, 3, 3, 3);
         layers.setLayerInset(2, 7, 7, 7, 7);
+        layers.setLayerInset(3, 10, 10, 10, 10);
         return layers;
     }
 
@@ -2134,14 +2287,11 @@ public class OverlayController {
     static final java.util.Map<View, Integer> CHIP_COLOR =
             new java.util.WeakHashMap<View, Integer>();
 
-    static final GradientDrawable[] RESUME_CACHE = new GradientDrawable[2];
-    static boolean resumeCacheLight = true;
 
-    /** Restyle in place. Cached drawables, and a no-op when the state already matches. */
+    /** Restyle in place, and a no-op when the state already matches. */
     static void styleResume(TextView t, boolean primary) {
         if (t == null) return;
-        if (t.getTag() instanceof Boolean && ((Boolean) t.getTag()) == primary
-                && resumeCacheLight == light()) {
+        if (t.getTag() instanceof Boolean && ((Boolean) t.getTag()) == primary) {
             return;
         }
         t.setTag(primary);
@@ -2152,33 +2302,27 @@ public class OverlayController {
         // sits next to and pushed the row's own text down the page.
         t.setTextSize(15);
         t.setTextColor(primary ? 0xFFFFFFFF : accent());
-        t.setPadding(16, 14, 16, 14);
+        // 12 above, 16 below: the bevel's face ends 4 dp above the view's bottom (the lip
+        // occupies that space), so its optical centre sits ~2 dp above the geometric one.
+        // Even padding put the label visibly low on the key.
+        t.setPadding(16, 12, 16, 16);
 
-        if (resumeCacheLight != light()) {
-            RESUME_CACHE[0] = null;
-            RESUME_CACHE[1] = null;
-            resumeCacheLight = light();
+        // A beveled key, not a flat ring: bright top edge, the face falling to a darker
+        // bottom, and a lip underneath. One instance per pill, because a Drawable carries
+        // its bounds - sharing one is how the old cached version leaked size between rows.
+        if (primary) {
+            t.setBackground(new Bevel(
+                    light() ? 0xFF6FAEFF : 0xFF8DF0FF,
+                    light() ? 0xFF0B4FB4 : 0xFF0A6E92,
+                    light() ? 0xFF063473 : 0xFF063E52,
+                    dp(15), dp(4)));
+        } else {
+            t.setBackground(new Bevel(
+                    light() ? 0xFFFFFFFF : 0xFF1E2C45,
+                    light() ? 0xFFD7E2F5 : 0xFF131C2D,
+                    light() ? 0xFFB4C6E4 : 0xFF0A111D,
+                    dp(15), dp(4)));
         }
-        int slot = primary ? 1 : 0;
-        if (RESUME_CACHE[slot] == null) {
-            GradientDrawable d;
-            if (primary) {
-                d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        light() ? new int[]{0xFF4B91F2, 0xFF0D5BC7}
-                                : new int[]{0xFF5DE4FF, 0xFF087CA4});
-                d.setCornerRadius(16);
-                d.setStroke(2, light() ? 0xFFD2E4FF : 0xFFB7F5FF);
-            } else {
-                d = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                        light() ? new int[]{0xFFEAF3FF, 0xFFC9DEFA}
-                                : new int[]{0xFF18263A, 0xFF121B2B});
-                d.setCornerRadius(16);
-                d.setStroke(2, accent());
-            }
-            RESUME_CACHE[slot] = d;
-        }
-        // Clone per pill for the same reason as focusBg: shared bounds.
-        t.setBackground(RESUME_CACHE[slot].getConstantState().newDrawable());
         // No elevation: a shadow on a translucent overlay costs an extra draw pass
         // every frame it is on screen, and on a TV it buys almost nothing.
         t.setElevation(0f);
@@ -2283,13 +2427,16 @@ public class OverlayController {
      * Marquee rather than ellipsis, because a long show name truncated to "The Madi…"
      * is useless at the one place you look to confirm what you are watching.
      */
+    /** Position shown in the ticker, held in whole minutes so the text stays put. */
+    static long tickerPos;
+
     static void updateTicker() {
         if (vTicker == null) return;
         String show = Sitemap.nameFor(vCtx, Watcher.CUR_SHOW_ID);
         if (show == null) show = Watcher.CUR_SERIES;
         String ep = Watcher.CUR_TITLE;
         if ((show == null || show.isEmpty()) && (ep == null || ep.isEmpty())) {
-            vTicker.setVisibility(View.GONE);
+            hideTicker();
             return;
         }
         StringBuilder b = new StringBuilder("\u25B6  ");
@@ -2297,19 +2444,48 @@ public class OverlayController {
         if (show != null && ep != null && !ep.isEmpty() && !ep.equalsIgnoreCase(show)) {
             b.append("   \u00B7   ").append(ep);
         }
-        if (Watcher.CUR_DUR > 0 && Watcher.CUR_POS > 0) {
-            b.append("   \u00B7   ").append(fmt(Watcher.CUR_POS))
+        // The clock advances every second and setting the text restarts the marquee -
+        // that was the blinking. It moves in whole minutes now.
+        if (Watcher.CUR_DUR > 0 && Watcher.CUR_POS > 0
+                && Math.abs(Watcher.CUR_POS - tickerPos) >= 60000) {
+            tickerPos = Watcher.CUR_POS;
+        }
+        if (Watcher.CUR_DUR > 0 && tickerPos > 0) {
+            b.append("   \u00B7   ").append(fmt(tickerPos))
                     .append(" / ").append(fmt(Watcher.CUR_DUR));
         }
         String text = b.toString();
-        // Only touch the view when the text really changed, or the marquee restarts
-        // every second and the line never travels.
         if (!text.equals(vTickerText)) {
             vTickerText = text;
             vTicker.setText(text);
         }
-        vTicker.setVisibility(View.VISIBLE);
+        showTicker();
+    }
+
+    /** Fade it in rather than popping it into the row. */
+    static void showTicker() {
+        if (vTicker == null) return;
+        if (vTicker.getVisibility() != View.VISIBLE || vTicker.getAlpha() < 1f) {
+            vTicker.animate().cancel();
+            vTicker.setVisibility(View.VISIBLE);
+            if (vTicker.getAlpha() < 1f) {
+                vTicker.animate().alpha(1f).setDuration(180).start();
+            }
+        }
         vTicker.setSelected(true);
+    }
+
+    /** Fade it out, so it retires instead of vanishing between frames. */
+    static void hideTicker() {
+        if (vTicker == null || vTicker.getVisibility() != View.VISIBLE) return;
+        vTicker.animate().cancel();
+        vTicker.animate().alpha(0f).setDuration(180).withEndAction(new Runnable() {
+            public void run() {
+                if (vTicker != null && vTicker.getAlpha() == 0f) {
+                    vTicker.setVisibility(View.GONE);
+                }
+            }
+        }).start();
     }
 
     /** The ticker's pill: a dark body with a shadow peeking out below it. */
@@ -2572,6 +2748,12 @@ public class OverlayController {
                 // Everything the TV still remembers, not merely what fits on screen.
                 for (Watcher.Item it : Watcher.localAll(vCtx)) live.add(Cache.key(it.title));
                 for (String b : Bookmarks.titles(vCtx)) live.add(Cache.key(b));
+                // Watch These posters and ratings belong to the other tab, but they are
+                // the same titles: pruning them here meant every switch back re-fetched
+                // images the card had already downloaded.
+                for (WatchThese.Pick p : WatchThese.cached(vCtx)) {
+                    if (p.title != null) live.add(Cache.key(p.title));
+                }
                 Cache.prune(vCtx, live);
 
                 int n = 0;
@@ -2580,7 +2762,7 @@ public class OverlayController {
                     // YouTube is never looked up: its rows are channel-plus-video
                     // titles, so OMDb answers with whatever film shares those words.
                     if (!wantsRatings(it)) continue;
-                    Ratings.Info info = cache.get(it.title);
+                    Ratings.Info info = lookupCache(it.title);
                     if (info == null) {
                         info = Ratings.lookup(vCtx, it.title, kindOf(it));
                         if (info != null) cache.put(it.title, info);
@@ -2606,8 +2788,11 @@ public class OverlayController {
                 r.append("\u2605 ").append(i.imdb);
                 if (i.imdbVotes != null) r.append(" (").append(i.imdbVotes).append(")");
             }
-            if (i.rt != null) r.append(r.length() > 0 ? "   " : "")
-                    .append("\uD83C\uDF45 ").append(i.rt);
+            // A stored "0%" is "no Tomatometer", not a review score of zero - the
+            // catalogue reports 0 for titles it has no rating for.
+            if (i.rt != null && !i.rt.startsWith("0")) {
+                r.append(r.length() > 0 ? "   " : "").append("\uD83C\uDF45 ").append(i.rt);
+            }
             if (r.length() > 0) {
                 h.rating.setText(r.toString());
             } else {
@@ -2653,7 +2838,7 @@ public class OverlayController {
                 }
             }
             if (h.cast != null && i.actors != null) {
-                h.cast.setText("Stars  " + i.actors.replace(", ", "  \u00B7  "));
+                h.cast.setText(castStyled(i.actors));
                 h.cast.setVisibility(View.VISIBLE);
             }
             // The row was measured while the synopsis and cast lines were still
@@ -2751,12 +2936,12 @@ public class OverlayController {
 
         if (vSheets.isEmpty()) {
             TextView none = new TextView(vCtx);
-            none.setText("No streaming app on this TV carries a 2026 series above 7.0 yet.");
+            none.setText("No streaming app on this TV carries a series above 7.0 from "
+                    + WatchThese.yearSpan() + " yet.");
             none.setTextSize(13);
             none.setTextColor(dim());
             none.setPadding(6, 12, 6, 0);
             vTheseList.addView(none);
-            vPaneTitle.setText("WATCH THESE");
             return;
         }
 
@@ -2777,6 +2962,17 @@ public class OverlayController {
             }
         }
 
+        int keepRow = -1;
+        View focusNow = root == null ? null : root.findFocus();
+        if (focusNow != null && vTheseList != null) {
+            for (int i = 0; i < vTheseList.getChildCount(); i++) {
+                if (isInside(focusNow, vTheseList.getChildAt(i))) {
+                    keepRow = i;
+                    break;
+                }
+            }
+        }
+
         for (int i = 0; i < vSheets.size(); i++) {
             final int index = i;
             vRail.addView(railTile(vSheets.get(i), index));
@@ -2788,8 +2984,17 @@ public class OverlayController {
         if (refreshing) fb.append("\nRefreshing\u2026");
         if (vRailFoot != null) vRailFoot.setText(fb.toString());
 
+        // A background refresh rebuilds this list, and it used to end by focusing the
+        // rail - which yanked the cursor out of the detail panel, or off the row being
+        // read, seconds after the panel opened. Put focus back where it was.
         selectSheet(sel, false);
-        focusRail();
+        if (infoOpen && vInfoPanel != null) {
+            vInfoPanel.requestFocus();
+        } else if (keepRow >= 0 && keepRow < vTheseList.getChildCount()) {
+            vTheseList.getChildAt(keepRow).requestFocus();
+        } else {
+            focusRail();
+        }
     }
 
     /**
@@ -2853,11 +3058,13 @@ public class OverlayController {
         });
         tile.setOnKeyListener(new View.OnKeyListener() {
             public boolean onKey(View v, int code, KeyEvent e) {
-                if (e.getAction() != KeyEvent.ACTION_UP) return false;
                 if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
-                    selectSheet(index, true);
+                    // Both halves: focus moves on DOWN, and letting the UP through
+                    // hands it to the row that just received focus.
+                    if (e.getAction() == KeyEvent.ACTION_DOWN) selectSheet(index, true);
                     return true;
                 }
+                if (e.getAction() != KeyEvent.ACTION_UP) return false;
                 return false;
             }
         });
@@ -2905,22 +3112,47 @@ public class OverlayController {
 
         vTheseList.removeAllViews();
         vTopRow = null;
-        vPaneTitle.setText(sheet.title.toUpperCase(java.util.Locale.US)
-                + (sheet.installed ? "  \u00B7  " + sheet.rows.size()
-                        + (sheet.curated ? " PICKS" : " TITLES")
-                        : "  \u00B7  NOT INSTALLED"));
 
         vRowSink = vTheseList;
         vRowScroll = vTheseScroll;
         vInstallMode = !sheet.installed;
+        final int gen = ++sheetGen;
+        final boolean curated = sheet.curated;
+        final java.util.List<WatchThese.Pick> rows = sheet.rows;
+        final boolean installed = sheet.installed;
+        final String sheetTitle = sheet.title;
         try {
-            for (int i = 0; i < sheet.rows.size(); i++) {
-                if (sheet.curated) addPickSeason(sheet.rows.get(i));
-                else addPick(i + 1, sheet.rows.get(i));
+            // The first screenful goes in this frame; 117 Netflix rows inflated
+            // synchronously is what made RIGHT on a rail tile feel unresponsive.
+            long t0 = System.currentTimeMillis();
+            int first = Math.min(rows.size(), FIRST_PAINT_ROWS);
+            for (int i = 0; i < first; i++) {
+                if (curated) addPickSeason(rows.get(i));
+                else addPick(i + 1, rows.get(i));
             }
-            if (!sheet.installed) {
+            Log.i(TAG, "sheet " + sheetTitle + ": first " + first + " rows in "
+                    + (System.currentTimeMillis() - t0) + " ms of " + rows.size());
+            if (first < rows.size()) {
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (gen != sheetGen) return;   // user moved on already
+                        vRowSink = vTheseList;
+                        vRowScroll = vTheseScroll;
+                        try {
+                            for (int i = FIRST_PAINT_ROWS; i < rows.size(); i++) {
+                                if (curated) addPickSeason(rows.get(i));
+                                else addPick(i + 1, rows.get(i));
+                            }
+                        } finally {
+                            vRowSink = null;
+                            vRowScroll = null;
+                        }
+                    }
+                });
+            }
+            if (!installed) {
                 TextView hint = new TextView(vCtx);
-                hint.setText("OK opens the Play Store for " + sheet.title
+                hint.setText("OK opens the Play Store for " + sheetTitle
                         + ". Install it, then reopen this tab.");
                 hint.setTextSize(12);
                 hint.setTextColor(dim2());
@@ -2947,8 +3179,456 @@ public class OverlayController {
     }
 
     /** "1 title" / "6 titles": the rail showed "1 titles" and it read like a bug. */
+    /**
+     * One actor, drawn as a chip: a rounded plate behind the name.
+     *
+     * The cast line was "Stars  A · B · C" - a sentence, not a list of people. A
+     * ReplacementSpan draws the plate inside the TextView, so the row keeps a single
+     * line and a single ellipsis rule while the names read as separate things.
+     */
+    static class CastChip extends android.text.style.ReplacementSpan {
+        @Override public int getSize(android.graphics.Paint paint, CharSequence text,
+                                     int start, int end,
+                                     android.graphics.Paint.FontMetricsInt fm) {
+            float pad = paint.getTextSize() * 0.52f;
+            return (int) (paint.measureText(text, start, end) + pad * 2);
+        }
+
+        @Override public void draw(android.graphics.Canvas canvas, CharSequence text,
+                                   int start, int end, float x, int top, int y, int bottom,
+                                   android.graphics.Paint paint) {
+            float pad = paint.getTextSize() * 0.52f;
+            float w = paint.measureText(text, start, end);
+            android.graphics.Paint.FontMetrics fm = paint.getFontMetrics();
+            float rTop = y + fm.ascent + paint.getTextSize() * 0.10f;
+            float rBot = y + fm.descent - paint.getTextSize() * 0.10f;
+            float radius = Math.max(4f, (rBot - rTop) / 2f);
+            android.graphics.Paint bg = new android.graphics.Paint(
+                    android.graphics.Paint.ANTI_ALIAS_FLAG);
+            bg.setColor(light() ? 0x141B2440 : 0x24A8C8FF);
+            canvas.drawRoundRect(x, rTop, x + w + pad * 2, rBot, radius, radius, bg);
+            canvas.drawText(text, start, end, x + pad, y, paint);
+        }
+    }
+
+    /** "Starring  [A] [B] [C]" - a label, then the names as chips. */
+    static CharSequence castStyled(String names) {
+        if (names == null) return "";
+        String[] parts = names.split(" \u00B7 |, ");
+        android.text.SpannableStringBuilder sb = new android.text.SpannableStringBuilder();
+        int labelStart = sb.length();
+        sb.append("Starring   ");
+        sb.setSpan(new android.text.style.RelativeSizeSpan(0.82f), labelStart, sb.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        sb.setSpan(new android.text.style.ForegroundColorSpan(dim2()), labelStart, sb.length(),
+                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        for (int i = 0; i < parts.length; i++) {
+            String name = parts[i].trim();
+            if (name.isEmpty()) continue;
+            if (i > 0) sb.append("  ");
+            int start = sb.length();
+            sb.append(name);
+            sb.setSpan(new CastChip(), start, sb.length(),
+                    android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        }
+        // Room after the last plate: a ReplacementSpan ends exactly at its measured
+        // width, and the ellipsis rule then clips the final chip's rounded edge.
+        sb.append("  ");
+        return sb;
+    }
+
+    /** True when v is the given view or lives inside it. */
+    static boolean isInside(View v, View container) {
+        View p = v;
+        while (p != null) {
+            if (p == container) return true;
+            if (!(p.getParent() instanceof View)) return false;
+            p = (View) p.getParent();
+        }
+        return false;
+    }
+
     static String plural(int n, String one) {
         return n + " " + one + (n == 1 ? "" : "s");
+    }
+
+    // ------------------------------------------------------------ info panel
+
+    /**
+     * The detail panel: RIGHT on a title slides a wide panel in from the right edge,
+     * over the collection, with everything the catalogue knows.
+     *
+     * It overlays rather than replaces, the same rule as the LEFT flyout — which stays a
+     * narrow strip by comparison, so the two gestures read as different weights of the
+     * same idea.
+     */
+    /** Extra metadata fetched for a panel that opened without it (curated picks). */
+    static final java.util.Map<String, Ratings.Info> panelExtra = new HashMap<>();
+
+    /**
+     * The loading skeleton: a rounded block with a highlight that sweeps across it.
+     *
+     * The panel is built the instant you press RIGHT, but the poster is a download and a
+     * curated pick has no synopsis until a lookup returns. A skeleton says "this part is
+     * coming" in the space it will occupy, so the panel never reflows under the cursor.
+     */
+    static class Shimmer extends View {
+        private final android.graphics.Paint paint = new android.graphics.Paint(
+                android.graphics.Paint.ANTI_ALIAS_FLAG);
+        private final long stopAt = System.currentTimeMillis() + 8000;
+
+        Shimmer(Context c) {
+            super(c);
+        }
+
+        @Override protected void onDraw(android.graphics.Canvas canvas) {
+            int w = getWidth(), h = getHeight();
+            if (w <= 0 || h <= 0) return;
+            int base = light() ? 0xFFE4E8F1 : 0xFF1B2336;
+            int high = light() ? 0xFFF4F6FB : 0xFF2B3752;
+            paint.setShader(null);
+            paint.setColor(base);
+            canvas.drawRoundRect(0, 0, w, h, 12, 12, paint);
+            if (System.currentTimeMillis() > stopAt) return;
+            float phase = (System.currentTimeMillis() % 1100L) / 1100f;
+            float x = -w + (w * 2f) * phase;
+            paint.setShader(new android.graphics.LinearGradient(
+                    x, 0, x + w * 0.7f, h, new int[]{base, high, base},
+                    new float[]{0f, 0.5f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRoundRect(0, 0, w, h, 12, 12, paint);
+            postInvalidateOnAnimation();
+        }
+    }
+
+    static void showInfo(final WatchThese.Pick p) {
+        showInfo(p, null);
+    }
+
+    static void showInfo(final WatchThese.Pick p, View anchor) {
+        if (vBody == null || p == null) return;
+        infoPick = p;
+        // The panel opens on RIGHT's DOWN; its UP then belongs to the key that opened
+        // it, not to the panel. Without this the panel closed in the same press.
+        swallowKeysUntil = android.os.SystemClock.uptimeMillis() + 300;
+        infoAnchor = anchor != null ? anchor : infoAnchor;
+        if (anchor != null && vTheseList != null && anchor.getParent() == vTheseList) {
+            infoAnchorRow = vTheseList.indexOfChild(anchor);
+        }
+        infoOpen = true;
+
+        if (vInfoPanel == null) {
+            vInfoPanel = new LinearLayout(vCtx);
+            vInfoPanel.setOrientation(LinearLayout.VERTICAL);
+            vInfoPanel.setFocusable(true);
+            vInfoPanel.setFocusableInTouchMode(true);
+            vInfoPanel.setClickable(true);
+            vInfoPanel.setPadding(dp(26), dp(22), dp(26), dp(18));
+            vInfoPanel.setBackground(rounded(light() ? 0xFFEBEEF6 : 0xFF131B2E, 22, stroke()));
+            vInfoPanel.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    WatchThese.Pick now = infoPick;
+                    closeInfo();
+                    if (now != null) openFromPick(now);
+                }
+            });
+            vInfoPanel.setOnKeyListener(new View.OnKeyListener() {
+                public boolean onKey(View v, int code, KeyEvent e) {
+                    if (e.getAction() != KeyEvent.ACTION_UP) return false;
+                    if (code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER) {
+                        WatchThese.Pick now = infoPick;
+                        closeInfo();
+                        if (now != null) openFromPick(now);
+                        return true;
+                    }
+                    if (code == KeyEvent.KEYCODE_DPAD_RIGHT) {
+                        WatchThese.Pick now = infoPick;
+                        closeInfo();
+                        if (now != null) openFromPick(now);
+                        return true;
+                    }
+                    if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE
+                            || code == KeyEvent.KEYCODE_DPAD_LEFT) {
+                        closeInfo();
+                        return true;
+                    }
+                    return false;
+                }
+            });
+        }
+
+        vInfoPanel.removeAllViews();
+
+        // The body scrolls; the action line below stays pinned. A long synopsis used to
+        // push "OPEN IN ..." off the bottom of the panel.
+        ScrollView scroller = new ScrollView(vCtx);
+        scroller.setVerticalScrollBarEnabled(false);
+        scroller.setVerticalFadingEdgeEnabled(true);
+        scroller.setFadingEdgeLength(30);
+        LinearLayout body = new LinearLayout(vCtx);
+        body.setOrientation(LinearLayout.VERTICAL);
+        scroller.addView(body);
+
+        // ---- title block with the poster beside it ----
+        LinearLayout top = new LinearLayout(vCtx);
+        top.setOrientation(LinearLayout.HORIZONTAL);
+        top.setGravity(Gravity.TOP);
+
+        if (p.poster != null) {
+            android.widget.FrameLayout pf = new android.widget.FrameLayout(vCtx);
+            android.widget.FrameLayout.LayoutParams plp =
+                    new android.widget.FrameLayout.LayoutParams(dp(96), dp(144));
+            pf.addView(new Shimmer(vCtx), plp);
+            ImageView poster = new ImageView(vCtx);
+            poster.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            pf.addView(poster, plp);
+            top.addView(pf, new LinearLayout.LayoutParams(dp(96), dp(144)));
+            Holder h = new Holder();
+            Watcher.Item it = new Watcher.Item();
+            it.title = p.title;
+            h.item = it;
+            h.poster = poster;
+            loadPoster(h, p.poster);
+        }
+
+        LinearLayout words = new LinearLayout(vCtx);
+        words.setOrientation(LinearLayout.VERTICAL);
+        words.setPadding(dp(20), 0, 0, 0);
+
+        TextView title = new TextView(vCtx);
+        title.setText(p.title);
+        title.setTextSize(26);
+        title.setTypeface(Typeface.create("sans-serif", Typeface.BOLD));
+        title.setTextColor(txt());
+        title.setMaxLines(3);
+        words.addView(title);
+
+        StringBuilder meta = new StringBuilder();
+        meta.append(p.season > 0 ? "Season " + p.season : String.valueOf(p.year));
+        if (p.cert != null) meta.append("  \u00B7  ").append(p.cert);
+        if (p.quality != null) meta.append("  \u00B7  ").append(p.quality);
+        if (!p.genres.isEmpty()) meta.append("\n").append(p.genres.replace(" \u00B7 ", " · "));
+        TextView metaLine = new TextView(vCtx);
+        metaLine.setText(meta.toString());
+        metaLine.setTextSize(13);
+        metaLine.setTextColor(dim());
+        metaLine.setLineSpacing(0, 1.2f);
+        metaLine.setPadding(0, 6, 0, 0);
+        words.addView(metaLine);
+
+        LinearLayout scores = new LinearLayout(vCtx);
+        scores.setOrientation(LinearLayout.HORIZONTAL);
+        scores.setGravity(Gravity.CENTER_VERTICAL);
+        scores.setPadding(0, 10, 0, 0);
+        TextView imdb = new TextView(vCtx);
+        imdb.setText("\u2605 " + p.imdb);
+        imdb.setTextSize(16);
+        imdb.setTypeface(Typeface.DEFAULT_BOLD);
+        imdb.setTextColor(light() ? 0xFF7A5200 : 0xFFFFC857);
+        scores.addView(imdb);
+        TextView votes = new TextView(vCtx);
+        votes.setText("  " + p.votesText() + " votes");
+        votes.setTextSize(12);
+        votes.setTextColor(dim2());
+        scores.addView(votes);
+        if (p.rt != null) {
+            TextView rt = new TextView(vCtx);
+            rt.setText("   \uD83C\uDF45 " + p.rt + "%");
+            rt.setTextSize(14);
+            rt.setTypeface(Typeface.DEFAULT_BOLD);
+            rt.setTextColor(dim());
+            scores.addView(rt);
+        }
+        words.addView(scores);
+
+        top.addView(words, new LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f));
+        body.addView(top);
+
+        // Curated picks carry only a score: the plot and cast have to be looked up, and
+        // the panel shows skeletons in their place until that lands.
+        Ratings.Info extra = panelExtra.get(p.title);
+        String synopsis = p.synopsis != null ? p.synopsis
+                : (extra != null ? extra.plot : null);
+        String cast = p.cast != null ? p.cast
+                : (extra != null ? extra.actors : null);
+        boolean pending = p.synopsis == null && extra == null;
+
+        if (synopsis != null) {
+            TextView plot = new TextView(vCtx);
+            plot.setText(synopsis);
+            plot.setTextSize(14);
+            plot.setTextColor(dim());
+            plot.setLineSpacing(0, 1.28f);
+            plot.setPadding(0, dp(16), 0, 0);
+            body.addView(plot);
+        }
+        if (cast != null) {
+            TextView castLine = new TextView(vCtx);
+            castLine.setText(castStyled(cast));
+            castLine.setTextSize(13);
+            castLine.setTextColor(dim2());
+            castLine.setPadding(0, dp(14), 0, 0);
+            body.addView(castLine);
+        }
+
+        if (pending) {
+            // Three paragraph lines plus a one-line cast strip, at the widths the real
+            // text will take, so nothing moves when it arrives.
+            body.addView(shimmerLine(0.96f, dp(15), dp(14)));
+            body.addView(shimmerLine(0.88f, dp(15), dp(8)));
+            body.addView(shimmerLine(0.74f, dp(15), dp(8)));
+            body.addView(shimmerLine(0.45f, dp(12), dp(16)));
+            kickPanelLookup(p);
+        }
+
+        vInfoPanel.addView(scroller, new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f));
+
+        TextView action = new TextView(vCtx);
+        // Two keys, two outcomes, and nothing else: RIGHT launches, LEFT goes back.
+        // Naming the service here was a promise the panel could not keep - the app can
+        // open a title but not navigate inside it.
+        action.setText("\u276F  RIGHT OPENS IN " + p.provider.toUpperCase(java.util.Locale.US)
+                + "        \u276E  LEFT BACK");
+        action.setTextSize(13);
+        action.setLetterSpacing(0.04f);
+        action.setTypeface(Typeface.DEFAULT_BOLD);
+        action.setTextColor(accent());
+        action.setPadding(0, dp(12), 0, 0);
+        vInfoPanel.addView(action);
+
+        int width = (int) (Math.max(vListW, 240) * 0.62f);
+        android.widget.FrameLayout.LayoutParams lp =
+                new android.widget.FrameLayout.LayoutParams(
+                        width, ViewGroup.LayoutParams.MATCH_PARENT);
+        lp.gravity = Gravity.END;
+        // Lightbox: the page behind dims, so the panel is a layer over it rather than a
+        // replacement for it. The scrim is not focusable and never takes the cursor.
+        if (vInfoScrim == null) {
+            vInfoScrim = new View(vCtx);
+            vInfoScrim.setFocusable(false);
+            vInfoScrim.setClickable(true);
+            vInfoScrim.setOnClickListener(new View.OnClickListener() {
+                public void onClick(View v) {
+                    closeInfo();
+                }
+            });
+        }
+        if (vInfoScrim.getParent() == null) {
+            vBody.addView(vInfoScrim, new android.widget.FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        vBody.bringChildToFront(vInfoScrim);
+
+        if (vInfoPanel.getParent() == null) {
+            vBody.addView(vInfoPanel, lp);
+        } else {
+            vInfoPanel.setLayoutParams(lp);
+            vBody.bringChildToFront(vInfoPanel);
+        }
+        vInfoScrim.setAlpha(0f);
+        vInfoScrim.animate().alpha(light() ? 0.38f : 0.55f).setDuration(200).start();
+        vInfoPanel.setTranslationX(width);
+        vInfoPanel.animate().translationX(0f).setDuration(220)
+                .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                .start();
+        vInfoPanel.requestFocus();
+    }
+
+    /** A single skeleton line, width as a fraction of the panel. */
+    static View shimmerLine(float fraction, int height, int topMargin) {
+        Shimmer v = new Shimmer(vCtx);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(
+                0, height, fraction);
+        lp.topMargin = topMargin;
+        v.setLayoutParams(lp);
+        return v;
+    }
+
+    static String lookupTitle;
+
+    /** One lookup per title, and only while its panel is the one on screen. */
+    static void kickPanelLookup(final WatchThese.Pick p) {
+        if (p.title.equals(lookupTitle)) return;
+        lookupTitle = p.title;
+        new Thread(new Runnable() {
+            public void run() {
+                Ratings.Info i = Ratings.lookup(vCtx, p.title, "series");
+                if (i != null) panelExtra.put(p.title, i);
+                ui.post(new Runnable() {
+                    public void run() {
+                        if (infoOpen && infoPick != null
+                                && p.title.equals(infoPick.title)) {
+                            showInfo(p);
+                        }
+                    }
+                });
+            }
+        }).start();
+    }
+
+    static void closeInfo() {
+        if (!infoOpen || vInfoPanel == null) return;
+        infoOpen = false;
+        swallowKeysUntil = android.os.SystemClock.uptimeMillis() + 300;
+        final View v = vInfoPanel;
+        // Stop taking focus before the animation, not after it: while the panel slid
+        // out it was still focusable and sitting over the collection, so a fast LEFT or
+        // RIGHT landed inside it, or on a rail tile the default search picked.
+        v.setFocusable(false);
+        v.setFocusableInTouchMode(false);
+        v.setClickable(false);
+        final View back = infoAnchor;
+        final int backRow = infoAnchorRow;
+        infoAnchor = null;
+        infoAnchorRow = -1;
+        int width = v.getWidth() > 0 ? v.getWidth() : (int) (Math.max(vListW, 240) * 0.62f);
+        if (vInfoScrim != null && vInfoScrim.getParent() != null) {
+            vInfoScrim.animate().alpha(0f).setDuration(160).withEndAction(new Runnable() {
+                public void run() {
+                    if (vBody != null) vBody.removeView(vInfoScrim);
+                }
+            }).start();
+        }
+        v.animate().translationX(width).setDuration(160).withEndAction(new Runnable() {
+            public void run() {
+                if (vBody != null) vBody.removeView(v);
+                // Again, once the panel is really gone: the first attempt can be undone
+                // by the removal itself, which is a focus change like any other.
+                restoreInfoFocus(back, backRow);
+            }
+        }).start();
+        restoreInfoFocus(back, backRow);
+    }
+
+    /**
+     * Put the cursor back on the row that opened the panel.
+     *
+     * By index, not by view: a background refresh rebuilds every row, so the view that
+     * opened the panel is detached by the time it closes - which is why the cursor kept
+     * ending up on the rail instead of the row it came from.
+     */
+    static void restoreInfoFocus(View back, int row) {
+        if (back != null && back.getParent() != null && back.isShown() && back.isFocusable()) {
+            if (back.requestFocus()) return;
+        }
+        if (row >= 0 && vTheseList != null && row < vTheseList.getChildCount()) {
+            View v = vTheseList.getChildAt(row);
+            if (v != null && v.isShown() && v.isFocusable() && v.requestFocus()) return;
+        }
+        if (tab == TAB_THESE) focusRail();
+        else focusTabContent();
+    }
+
+    /** Open a pick the same way a row press does, without needing the row. */
+    static void openFromPick(WatchThese.Pick p) {
+        if (p == null) return;
+        if (vInstallMode) {
+            openStore(p.provider);
+            return;
+        }
+        if (openShow(p.url, p.provider, p.deeplink)) dismiss(false);
     }
 
     static void focusRail() {
@@ -3092,6 +3772,14 @@ public class OverlayController {
                     else focusSort();   // sort icons have no other route
                     return true;
                 }
+                if (e.getAction() == KeyEvent.ACTION_DOWN
+                        && code == KeyEvent.KEYCODE_DPAD_RIGHT && inPane) {
+                    // On DOWN, and above the UP guard below. Handling it on UP meant a
+                    // rail tile's RIGHT moved focus into the pane and the same key's UP
+                    // then opened the panel - one press, two levels.
+                    showInfo(p, row);
+                    return true;
+                }
                 if (e.getAction() != KeyEvent.ACTION_UP) return false;
                 if (code == KeyEvent.KEYCODE_BACK || code == KeyEvent.KEYCODE_ESCAPE) {
                     dismiss(true);
@@ -3169,7 +3857,8 @@ public class OverlayController {
         LinearLayout rail = new LinearLayout(vCtx);
         rail.setOrientation(LinearLayout.VERTICAL);
         rail.setGravity(Gravity.END);
-        rail.setPadding(18, 0, 2, 0);
+        // 5% further right: the action column now sits against the row edge
+        rail.setPadding(18, 0, 0, 0);
 
         TextView score = new TextView(vCtx);
         score.setText("\u2605 " + p.imdb);
@@ -3200,6 +3889,22 @@ public class OverlayController {
         rail.addView(watch);
 
         row.addView(rail);
+
+        // A chevron on the right border is the only thing that says "there is more to
+        // the right"; without it the detail panel is undiscoverable. It lights with the
+        // row so the affordance and the focus ring agree.
+        final TextView chev = new TextView(vCtx);
+        if (inPane && !vInstallMode) {
+            chev.setText("\u276F");
+            chev.setTextSize(20);
+            chev.setTextColor(alpha(dim2(), 0x66));
+            chev.setPadding(dp(12), 0, dp(2), 0);
+            chev.setIncludeFontPadding(false);
+            row.addView(chev);
+        } else {
+            chev.setText("");
+        }
+
         if (vInstallMode) row.setAlpha(0.8f);
 
         row.setOnClickListener(new View.OnClickListener() {
@@ -3218,6 +3923,7 @@ public class OverlayController {
                 paintFocus();
                 // The action is what OK will do: light it with the row.
                 watch.setTextColor(has ? txt() : accent());
+                chev.setTextColor(has ? accent() : alpha(dim2(), 0x66));
                 if (!has) return;
                 // Same rule as the watching rows: jump only when the row is not
                 // already fully on screen, so focus never shakes the list.
@@ -3247,6 +3953,7 @@ public class OverlayController {
     static void theseUpdated() {
         ui.post(new Runnable() {
             public void run() {
+                seedFromThese();
                 if (root != null && tab == TAB_THESE) buildTab();
             }
         });
@@ -3345,6 +4052,37 @@ public class OverlayController {
      */
     static String deepLink(String provider, String url) {
         return url;
+    }
+
+    /** One character per provider package: "1" if it can be launched, "0" if not. */
+    static String vInstallSig;
+
+    /** Record the current state, so the first comparison after opening is a no-op. */
+    static void primeInstalls() {
+        vInstallSig = installSig();
+    }
+
+    static String installSig() {
+        StringBuilder sb = new StringBuilder();
+        for (String[] prov : WatchThese.PROVIDERS) {
+            for (String pkg : prov[2].split("\\|")) {
+                sb.append(canLaunch(pkg) ? '1' : '0');
+            }
+        }
+        return sb.toString();
+    }
+
+    /** Rebuild the panel when the set of launchable services changed under us. */
+    static void checkInstalls() {
+        String sig = installSig();
+        if (vInstallSig == null) {
+            vInstallSig = sig;
+            return;
+        }
+        if (sig.equals(vInstallSig)) return;
+        vInstallSig = sig;
+        Log.i(TAG, "install signature changed: " + sig);
+        if (tab == TAB_THESE && !menuOpen) buildTab();
     }
 
     // ---------------------------------------------------------------- stats
@@ -4412,6 +5150,8 @@ public class OverlayController {
     }
 
     static final Map<String, Bitmap> assetCache = new HashMap<>();
+    /** Assets already reported missing, so a rebuild does not repeat the warning. */
+    static final java.util.Set<String> assetMisses = new java.util.HashSet<>();
 
     static Bitmap assetBitmap(String name) {
         if (vCtx == null) return null;
@@ -4422,7 +5162,11 @@ public class OverlayController {
             bm = BitmapFactory.decodeStream(in);
             in.close();
         } catch (Exception e) {
-            Log.w(TAG, "asset " + name + ": " + e);
+            // A missing optional asset (the logo drop-ins) is the normal case, not a
+            // fault: the code falls back to the drawn wordmark for every service.
+            if (assetMisses.add(name)) {
+                Log.i(TAG, "no asset " + name + " (drawn wordmark in use)");
+            }
         }
         assetCache.put(name, bm);
         return bm;
@@ -4479,7 +5223,12 @@ public class OverlayController {
         new Thread(new Runnable() {
             public void run() {
                 try {
-                    InputStream in = (InputStream) new URL(url).openStream();
+                    java.net.HttpURLConnection ic =
+                        (java.net.HttpURLConnection) new URL(url).openConnection();
+                ic.setConnectTimeout(6000);
+                ic.setReadTimeout(9000);
+                Http.image(ic);
+                InputStream in = ic.getInputStream();
                     final Bitmap bm = BitmapFactory.decodeStream(in);
                     in.close();
                     if (bm == null) return;

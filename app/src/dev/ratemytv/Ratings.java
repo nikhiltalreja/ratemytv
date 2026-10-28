@@ -332,6 +332,7 @@ public class Ratings {
             c = (HttpURLConnection) new URL(url).openConnection();
             c.setConnectTimeout(4000);
             c.setReadTimeout(4000);
+            Http.json(c);
             if (c.getResponseCode() != 200) return null;
             BufferedReader r = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
             StringBuilder sb = new StringBuilder();

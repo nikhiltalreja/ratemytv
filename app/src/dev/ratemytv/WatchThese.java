@@ -48,21 +48,21 @@ public class WatchThese {
     static final String ENDPOINT = "https://apis.justwatch.com/graphql";
     static final String PREFS = "watchthese";
     /** Bump when the join rules change, so an old list cannot outlive them. */
-    static final String V = "8";
+    static final String V = "14";
     static final String KEY = "list" + V;
     static final String STAMP = "at" + V;
     static final String RETRY = "retryAt" + V;
 
     /**
-     * No single service may flood the shelf: Netflix alone had 36 qualifying series,
-     * which is a catalogue, not a shortlist. Six per service keeps nine services
-     * browsable.
+     * Every title that qualifies is kept — no per-service cap.
+     *
+     * The shelf was capped at six per service to stop one catalogue swamping the rest,
+     * but that also hid most of a service's catalogue behind a number nobody asked for.
+     * MAX_ROWS is only a guard against a pathological response, not a curation rule.
      */
-    static final int PER_PROVIDER = 6;
-    /** Hard bound on the prefs blob (nine services, with slack). */
-    static final int MAX_ROWS = 80;
+    static final int MAX_ROWS = 400;
     /** "Above 7.0 stars", strictly: a 7.0 exactly would be a coin flip. */
-    static final double MIN_RATING = 7.0;
+    static final double MIN_RATING = 6.5;
     /**
      * Below this a 9.x is three friends and a bot, not a rating. 1 000 also keeps a
      * 507-vote documentary from outranking a 7 600-vote series on a 0.1 score edge.
@@ -95,22 +95,44 @@ public class WatchThese {
             {"Crunchyroll", "CRUNCHYROLL", "com.crunchyroll.crunchyroid"},
     };
 
+    /** How many release years the shelf covers, counting back from this one. */
+    static final int YEARS_BACK = 3;
+
     static final String QUERY =
-            "query S($country: Country!, $language: Language!, $offset: Int!) {"
+            "query S($country: Country!, $language: Language!, $offset: Int!,"
+            + " $year: Int!) {"
             + " popularTitles(country: $country, first: 100, offset: $offset,"
-            + " filter: {objectTypes: [SHOW], releaseYear: {min: 2026, max: 2026}}) {"
+            + " filter: {objectTypes: [SHOW], releaseYear: {min: $year, max: $year}}) {"
             + " edges { node { content(country: $country, language: $language) {"
-            + " title originalReleaseYear genres { translation(language: $language) }"
-            + " scoring { imdbScore imdbVotes } }"
+            + " title originalReleaseYear runtime shortDescription ageCertification"
+            + " genres { translation(language: $language) }"
+            + " credits(first: 6) { name role }"
+            + " posterUrl"
+            + " scoring { imdbScore imdbVotes tomatoMeter } }"
             + " offers(country: $country, platform: WEB) {"
-            + " package { clearName } standardWebURL"
+            + " package { clearName } standardWebURL presentationType"
             + " deeplinkURL(platform: ANDROID_TV) } } } } }";
 
     /**
-     * Pages of 100 to ask for. The Testaments sits around #200-300 of the 2026
-     * popularity order, so two pages missed it; three cover it.
+     * Pages of 100 per year. Asking for the three years in one window would let 2026
+     * popularity crowd out 2024 entirely, so each year is queried on its own; two pages
+     * a year is the same depth 2026 had when it was the only year.
      */
-    static final int PAGES = 3;
+    static final int PAGES_PER_YEAR = 2;
+
+    /** The release years on the shelf, newest first: 2026, 2025, 2024 today. */
+    static int[] years() {
+        int thisYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR);
+        int[] out = new int[YEARS_BACK];
+        for (int i = 0; i < YEARS_BACK; i++) out[i] = thisYear - i;
+        return out;
+    }
+
+    /** "2024–2026", for the panel's subtitle and the empty state. */
+    static String yearSpan() {
+        int[] y = years();
+        return y[y.length - 1] + "\u2013" + y[0];
+    }
 
     static volatile boolean busy;
 
@@ -132,6 +154,18 @@ public class WatchThese {
          * forward.
          */
         final String deeplink;
+        /** Plot text from the catalogue, for the detail panel. */
+        final String synopsis;
+        /** First three actors, "A · B · C", or null. */
+        final String cast;
+        /** Rotten Tomatoes percentage as "99", or null. */
+        final String rt;
+        /** Age rating, e.g. "A" or "TV-MA", or null. */
+        final String cert;
+        /** Poster path on the image CDN, already substituted, or null. */
+        final String poster;
+        /** Best resolution sold: "4K", "HD", "SD", or null. */
+        final String quality;
 
         Pick(String title, String imdb, long votes, String genres, int year,
              String provider, String url) {
@@ -150,6 +184,13 @@ public class WatchThese {
 
         Pick(String title, String imdb, long votes, String genres, int year, int season,
              String provider, String url, String deeplink) {
+            this(title, imdb, votes, genres, year, season, provider, url, deeplink,
+                    null, null, null, null, null, null);
+        }
+
+        Pick(String title, String imdb, long votes, String genres, int year, int season,
+             String provider, String url, String deeplink, String synopsis, String cast,
+             String rt, String cert, String poster, String quality) {
             this.title = title;
             this.imdb = imdb;
             this.votes = votes;
@@ -159,6 +200,12 @@ public class WatchThese {
             this.provider = provider;
             this.url = url;
             this.deeplink = deeplink;
+            this.synopsis = synopsis;
+            this.cast = cast;
+            this.rt = rt;
+            this.cert = cert;
+            this.poster = poster;
+            this.quality = quality;
         }
 
         String votesText() {
@@ -199,6 +246,12 @@ public class WatchThese {
                 o.put("p", p.provider);
                 o.put("u", p.url);
                 if (p.deeplink != null) o.put("d", p.deeplink);
+                if (p.synopsis != null) o.put("s", p.synopsis);
+                if (p.cast != null) o.put("c", p.cast);
+                if (p.rt != null) o.put("rt", p.rt);
+                if (p.cert != null) o.put("ce", p.cert);
+                if (p.poster != null) o.put("po", p.poster);
+                if (p.quality != null) o.put("q", p.quality);
                 arr.put(o);
             } catch (Exception ignored) {
             }
@@ -219,8 +272,11 @@ public class WatchThese {
             String u = o.optString("u", "");
             if (t.isEmpty() || u.isEmpty()) continue;
             out.add(new Pick(t, o.optString("r", "?"), o.optLong("v", 0),
-                    o.optString("g", ""), o.optInt("y", 2026),
-                    o.optString("p", "JIOHOTSTAR"), u, o.optString("d", null)));
+                    o.optString("g", ""), o.optInt("y", 2026), 0,
+                    o.optString("p", "JIOHOTSTAR"), u, o.optString("d", null),
+                    o.optString("s", null), o.optString("c", null),
+                    o.optString("rt", null), o.optString("ce", null),
+                    o.optString("po", null), o.optString("q", null)));
         }
         return out;
     }
@@ -274,14 +330,17 @@ public class WatchThese {
     static List<Pick> fetch(Context c) {
         List<Pick> all = new ArrayList<Pick>();
         boolean any = false;
-        for (int page = 0; page < PAGES; page++) {
-            String body = post(page * 100);
-            if (body == null) continue;
-            any = true;
-            collect(body, all);
+        for (int year : years()) {
+            for (int page = 0; page < PAGES_PER_YEAR; page++) {
+                String body = post(page * 100, year);
+                if (body == null) continue;
+                any = true;
+                collect(body, all);
+            }
         }
         if (!any) return null;
-        Log.i(TAG, "matched " + all.size() + " rated shows with an offer");
+        Log.i(TAG, "matched " + all.size() + " rated shows with an offer ("
+                + yearSpan() + ")");
 
         Collections.sort(all, new Comparator<Pick>() {
             public int compare(Pick a, Pick b) {
@@ -291,15 +350,10 @@ public class WatchThese {
             }
         });
 
-        // Cap per service, keeping the rating order within each.
+        // Everything that qualified, in rating order. No per-service quota.
         List<Pick> out = new ArrayList<Pick>();
-        int[] taken = new int[PROVIDERS.length];
         for (int i = 0; i < all.size() && out.size() < MAX_ROWS; i++) {
-            Pick p = all.get(i);
-            int idx = providerIndex(p.provider);
-            if (idx < 0 || taken[idx] >= PER_PROVIDER) continue;
-            taken[idx]++;
-            out.add(p);
+            out.add(all.get(i));
         }
         return out;
     }
@@ -354,36 +408,111 @@ public class WatchThese {
                     }
                 }
                 if (dup) continue;
+                // 0 means "no Tomatometer", not a score of zero.
+                int tomato = scoring.optInt("tomatoMeter", 0);
+                String rt = tomato > 0 ? String.valueOf(tomato) : null;
                 out.add(new Pick(title, String.format(Locale.US, "%.1f", rating), votes,
-                        genres, content.optInt("originalReleaseYear", 2026),
-                        offer[0], offer[1], offer[2]));
+                        genres, content.optInt("originalReleaseYear", 2026), 0,
+                        offer[0], offer[1], offer[2],
+                        trim(content.optString("shortDescription", ""), 420),
+                        castText(content.optJSONArray("credits")),
+                        rt,
+                        blankToNull(content.optString("ageCertification", "")),
+                        poster(content.optString("posterUrl", "")),
+                        offer[3]));
             }
         } catch (Exception e) {
             Log.w(TAG, "collect: " + e);
         }
     }
 
+    /** Plot text, clipped on a word boundary so the panel does not hold a novel. */
+    static String trim(String s, int max) {
+        String t = s == null ? "" : s.trim();
+        if (t.isEmpty()) return null;
+        if (t.length() <= max) return t;
+        int cut = t.lastIndexOf(' ', max);
+        return t.substring(0, cut > max / 2 ? cut : max) + "\u2026";
+    }
+
+    static String blankToNull(String s) {
+        return s == null || s.trim().isEmpty() ? null : s.trim();
+    }
+
+    /** First three ACTOR credits, joined for one line: "A · B · C". */
+    static String castText(JSONArray credits) {
+        if (credits == null) return null;
+        StringBuilder sb = new StringBuilder();
+        int taken = 0;
+        for (int i = 0; i < credits.length() && taken < 3; i++) {
+            JSONObject c = credits.optJSONObject(i);
+            if (c == null) continue;
+            if (!"ACTOR".equalsIgnoreCase(c.optString("role", ""))) continue;
+            String name = c.optString("name", "").trim();
+            if (name.isEmpty() || sb.indexOf(name) >= 0) continue;
+            if (sb.length() > 0) sb.append(" \u00B7 ");
+            sb.append(name);
+            taken++;
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    /** The catalogue's poster template, filled in for a 332px wide JPEG. */
+    static String poster(String template) {
+        if (template == null || template.isEmpty()) return null;
+        return "https://images.justwatch.com"
+                + template.replace("{profile}", "s332").replace("{format}", "jpg");
+    }
+
     /**
-     * The best offer for one of our services: {display, web URL, TV deeplink}. Priority
-     * is the order in PROVIDERS, so a title on both JioHotstar and Netflix is listed
-     * once, on the service this app is built for. The deeplink may be null.
+     * The best offer for one of our services: {display, web URL, TV deeplink, quality}.
+     * Priority is the order in PROVIDERS, so a title on both JioHotstar and Netflix is
+     * listed once, on the service this app is built for. The deeplink may be null.
      */
     static String[] offerFor(JSONArray offers) {
         if (offers == null) return null;
         for (String[] prov : PROVIDERS) {
+            String url = null;
+            String deep = null;
+            String quality = null;
             for (int i = 0; i < offers.length(); i++) {
                 JSONObject o = offers.optJSONObject(i);
                 if (o == null) continue;
                 JSONObject pkg = o.optJSONObject("package");
                 if (pkg == null) continue;
                 if (!prov[0].equalsIgnoreCase(pkg.optString("clearName", ""))) continue;
-                String url = o.optString("standardWebURL", "");
-                if (url.isEmpty()) continue;
-                String deep = o.optString("deeplinkURL", "");
-                return new String[]{prov[1], url, deep.isEmpty() ? null : deep};
+                String u = o.optString("standardWebURL", "");
+                if (u.isEmpty()) continue;
+                if (url == null) {
+                    url = u;
+                    String d = o.optString("deeplinkURL", "");
+                    deep = d.isEmpty() ? null : d;
+                }
+                // One offer per resolution tier; keep the best one for the info panel.
+                String tier = qualityTier(o.optString("presentationType", ""));
+                if (tier != null && (quality == null || rank(tier) > rank(quality))) {
+                    quality = tier;
+                }
             }
+            if (url != null) return new String[]{prov[1], url, deep, quality};
         }
         return null;
+    }
+
+    /** "_4K" -> "4K"; anything unrecognised is ignored rather than shown raw. */
+    static String qualityTier(String presentationType) {
+        if (presentationType == null) return null;
+        String t = presentationType.replace("_", "").trim().toUpperCase(Locale.US);
+        if (t.equals("4K") || t.equals("UHD")) return "4K";
+        if (t.equals("HD")) return "HD";
+        if (t.equals("SD")) return "SD";
+        return null;
+    }
+
+    static int rank(String tier) {
+        if ("4K".equals(tier)) return 3;
+        if ("HD".equals(tier)) return 2;
+        return 1;
     }
 
     static int providerIndex(String display) {
@@ -407,13 +536,14 @@ public class WatchThese {
         return sb.toString();
     }
 
-    static String post(int offset) {
+    static String post(int offset, int year) {
         HttpURLConnection conn = null;
         try {
             JSONObject variables = new JSONObject();
             variables.put("country", "IN");
             variables.put("language", "en");
             variables.put("offset", offset);
+            variables.put("year", year);
             JSONObject payload = new JSONObject();
             payload.put("query", QUERY);
             payload.put("variables", variables);
@@ -423,13 +553,12 @@ public class WatchThese {
             conn.setReadTimeout(12000);
             conn.setRequestMethod("POST");
             conn.setDoOutput(true);
-            conn.setRequestProperty("Content-Type", "application/json");
-            conn.setRequestProperty("User-Agent", "RateMyTV/1.0");
+            Http.graphql(conn);
             OutputStream out = conn.getOutputStream();
             out.write(payload.toString().getBytes("UTF-8"));
             out.close();
             if (conn.getResponseCode() != 200) {
-                Log.i(TAG, "http " + conn.getResponseCode() + " offset " + offset);
+                Log.i(TAG, "http " + conn.getResponseCode() + " offset " + offset + " year " + year);
                 return null;
             }
             InputStream in = conn.getInputStream();

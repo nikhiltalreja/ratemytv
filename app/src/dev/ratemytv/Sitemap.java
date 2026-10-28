@@ -263,6 +263,7 @@ public class Sitemap {
             conn = (HttpURLConnection) new URL(url).openConnection();
             conn.setConnectTimeout(8000);
             conn.setReadTimeout(timeoutMs);
+            Http.browser(conn);
             if (ifModifiedSince != null && !ifModifiedSince.isEmpty()) {
                 conn.setRequestProperty("If-Modified-Since", ifModifiedSince);
             }

@@ -92,7 +92,7 @@ public class Updater {
                     conn = (HttpURLConnection) new URL(API).openConnection();
                     conn.setConnectTimeout(6000);
                     conn.setReadTimeout(6000);
-                    conn.setRequestProperty("Accept", "application/vnd.github+json");
+                    Http.json(conn);
                     if (conn.getResponseCode() != 200) {
                         Log.i(TAG, "release check: http " + conn.getResponseCode());
                         return;
@@ -145,6 +145,7 @@ public class Updater {
                     conn = (HttpURLConnection) new URL(apkUrl).openConnection();
                     conn.setConnectTimeout(10000);
                     conn.setReadTimeout(30000);
+                    Http.browser(conn);
                     InputStream in = conn.getInputStream();
                     FileOutputStream fos = new FileOutputStream(out);
                     byte[] buf = new byte[16384];

@@ -18,10 +18,10 @@ YouTube, Netflix, Prime, Apple TV and SonyLIV work too, where their own data all
 and the section below says exactly where that stops.
 
 Then it goes one step ahead of X-Ray. **Watch These** is a rolling list of the
-best-rated shows streaming on the services installed on this TV — JioHotstar, Netflix,
-Prime Video, ZEE5, Apple TV, Hoichoi and Crunchyroll, one service per section
-per installed app. It is rebuilt from the ratings catalogue every 12 hours. OK on a
-pick opens the title in its app, with no search.
+best-rated shows from the last three years, streaming on the services installed on this TV
+— JioHotstar, Netflix, Prime Video, ZEE5, Apple TV, Hoichoi and Crunchyroll — one service
+per section. It is rebuilt from the ratings catalogue every 12 hours. OK on a pick opens
+the title in its app, with no search.
 
 <p align="center">
   <a href="#what-it-does">What it does</a> ·
@@ -245,7 +245,9 @@ from another app, and stats is the `STATS` tab.
 `WATCHING` lists titles this TV has played. `WATCH THESE` is two panes: the services
 installed on this TV on the left, the selected service's 2026 picks on the right.
 `STATS` summarises the month. `SETTINGS` holds the OMDb key, the theme, and the version
-(with the update state). Colour, type and focus rules live in [docs/UI.md](docs/UI.md).
+(with the update state). The design policy — canvas, type range, colour floors, depth,
+loading states and the pre-ship checklist — is [docs/TV-UX.md](docs/TV-UX.md); measured
+palette values are in [docs/UI.md](docs/UI.md).
 
 | Key | Action |
 |---|---|
@@ -262,7 +264,7 @@ In `WATCH THESE` a key never means two things — the pane with focus decides:
 | Focus | Up / Down | Left / Right | OK |
 |---|---|---|---|
 | Service rail (left) | Previous / next service | Right enters that service's page | Open the page |
-| Collection (right) | Previous / next title | Left returns to the rail | Open the title in its app |
+| Collection (right) | Previous / next title | Left returns to **this service's tile** — wherever focus was, even on the scroller at the end of a long list | Open the title in its app |
 
 Only the focused row draws `RESUME` in the accent colour; the rest stay dark, so the
 active control is unambiguous.
@@ -281,10 +283,10 @@ A TV is watched from three metres, so "secondary" has to mean *smaller*, not *fa
 
 - Secondary greys are much darker on the light card (`#2C3549` and `#4A5468` instead of
   `#3E4A66`/`#6A7590`), taking them from roughly 3:1 to 7:1 and 5:1.
-- **Letter-spacing is near-flat on labels** — `NEW SEASONS · 5 PICKS` and the section
-  headers were tracked at 0.10–0.22em, which on a light card with grey text turned into
-  a row of separated hairlines. Titles keep their tighter setting; labels now sit at
-  0.03–0.06em.
+- **Letter-spacing is near-flat on labels** — `CONTINUE WATCHING`, the rail's count lines
+  and the menu rows were tracked at 0.10–0.22em, which on a light card with grey text
+  turned into a row of separated hairlines. Titles keep their tighter setting; labels now
+  sit at 0.03–0.06em.
 - Brand inks have a **light-mode variant**: Apple TV drops to near-black (`#2F3238`)
   because its dark-mode near-white vanished, Netflix deepens to `#C40812`, and the
   "not installed" tiles keep their own colour at higher alpha rather than going grey.
@@ -311,30 +313,76 @@ playing the list is always by recency, with that title pinned first.
 
 ### Watch These
 
-Series that began in 2026, each above 7.0 on IMDb, on any of **seven services**: JioHotstar,
-Netflix, Prime Video, ZEE5, Apple TV, Hoichoi and Crunchyroll. The list
-is fetched live on the TV from one public, keyless ratings catalogue the card also uses to
-fill scores OMDb lacks. Three requests of 100 shows each carry title, year, three genres,
-the IMDb score and vote count, and the offers — which service carries it and its canonical
-URL. About **175 KB**, still with no poster, plot or cast.
+Series from the **last three release years** — 2024–2026 today, and it rolls forward on
+its own — each above 7.0 on IMDb, on any of **seven services**: JioHotstar, Netflix, Prime
+Video, ZEE5, Apple TV, Hoichoi and Crunchyroll. The list is fetched live on the TV from one
+public, keyless ratings catalogue the card also uses to fill scores OMDb lacks.
+
+The window is queried **one year at a time**, two pages of 100 each: a single
+`releaseYear {min: 2024, max: 2026}` window would sort by popularity across all three
+years and let 2026 crowd 2024 off the shelf entirely. Six requests carry title, year,
+genres, the IMDb score and vote count, the Tomatometer, the certificate, the synopsis, the
+top credits, the poster path, and the offers with their quality tiers. About **500 KB** per
+refresh, cached 12 hours; the poster image is fetched only when a detail panel opens.
 
 Each title is placed on the first service, in that order, that carries it, so nothing is
-listed twice. Rating must be strictly above 7.0 with at least 1 000 votes; the result is
-sorted by rating then votes and **capped at six per service** — Netflix alone had 36
-qualifying series, which is a catalogue, not a shortlist. About 25 rows on the test TV.
+listed twice. Rating must be strictly above **6.5** with at least 1 000 votes, and the result is sorted
+by rating then votes. **Every qualifying title is kept** — there is no
+per-service quota. On the test TV that is 284 rows: 117 on Netflix, 74 on JioHotstar, 52 on
+Prime Video, 23 on Apple TV, the rest on the two services not installed. The year is
+printed on every row, so an 8.9 from 2025 does not read as a 2026 release.
+
+`MAX_ROWS` (400) is only a guard against a pathological response, not a curation rule.
 
 The panel is **two panes**: a rail of services on the left — a wide wordmark in each
 brand's own colour, with its count — and one service's collection on the right. The rail
-remembers the last service you opened. The selected service's name and count
-(`NETFLIX · 6 TITLES`) sit on their own line above both panes, not inside the collection:
-a heading in the pane pushed its first title down and left it a few pixels below the
-first rail tile. Now the two columns start on the same line.
+remembers the last service you opened. There is **no heading above the collection**: the
+service name and title count repeated what the rail's focused tile already says, and it
+pushed the first title a heading's height below the first tile. Both columns now start on
+the same line.
+
+**Switching a service paints its first screen in the same frame** (14 rows, measured 53 ms
+for JioHotstar and 59 ms for Netflix); the rest of the collection is appended on the next
+loop turn. Inflating all 117 Netflix rows synchronously is what made RIGHT on a rail tile
+feel unresponsive. A generation counter drops the queued tail if you move on before it
+lands.
+
+**RIGHT on a title opens its detail panel.** A wide panel slides in from the right edge
+over the collection — poster, title, year, certificate, best resolution sold (`4K`/`HD`),
+genres, IMDb score with votes, Tomatometer, synopsis, three leads, and the service it opens
+in. The body scrolls; the action line is pinned, so a long synopsis cannot push
+`OPEN IN …` off the bottom. **RIGHT launches the title, LEFT goes back, BACK closes** — the same direction that opened
+the panel commits to it, and the footer says exactly that with both arrows.
+
+While something is genuinely in flight the panel shows **skeletons**, not gaps: a rounded
+block with a highlight sweeping across it sits under the poster until the image decodes,
+and a curated pick — which carries only a score — gets three paragraph lines and a cast
+strip at the exact widths its text will take, replaced when the lookup lands. The point is
+that the panel never reflows under the cursor. With warm caches it is a blink or nothing,
+which is correct: a shimmer that outlives the wait is theatre.
+
+The LEFT flyout deliberately stays a narrow strip next to this wide panel: the two
+gestures read as different weights of the same idea, one for navigation and one for detail.
 
 A service whose app this TV cannot open stays in the rail, dimmed, labelled
 **"Not installed · install"**, and its page shows the same picks with an `INSTALL` action:
 OK opens the Play Store listing, so a missing service is one press from being added.
 `NEW SEASONS` is the last tile — the hand-checked row from below, kept out of the live
 pages because it is curated, not fetched.
+
+**Installing a service does not need an app restart.** The rail asks the PackageManager
+every time the tab is built, so closing and reopening the card (or switching away from
+WATCH THESE and back) is enough. Three things try to make it instant; only the first is
+guaranteed on this TV:
+
+1. Rebuilding the tab — always fresh.
+2. Re-checking when the card regains window focus, which is the moment you come back from
+   the Play Store. The check compares a launchability signature per provider, so it costs
+   nothing when nothing changed.
+3. A manifest `PACKAGE_ADDED` receiver (`InstallWatch`). It is declared and registers
+   cleanly, but this Mi TV never delivered a package broadcast to it during testing —
+   runtime receivers did not receive them either, though Play Store's own receivers do.
+   The code is kept because it costs nothing and should work on other ROMs.
 
 "Installed" means **launchable**, not merely present. This TV ships preloads that look
 installed: SonyLIV is a real app with a leanback launcher, while MX Player is a disabled
@@ -393,6 +441,32 @@ Opening the tab always paints the cached (or bundled) list first, so nothing wai
 network, and the panel repaints itself when a refresh lands. On the first run offline it
 falls back to five saved picks, labelled as such.
 
+### What is cached, and what the two tabs share
+
+The shelf and the watched list describe the same catalogues, so they now share their
+facts instead of each fetching their own:
+
+| Store | Scope | Shared? |
+|---|---|---|
+| Watch These list (222 titles: score, votes, synopsis, cast, RT, poster URL) | prefs, 12 h | **Source** |
+| Ratings map (title → score, plot, cast, RT) | memory | **Seeded from the shelf** on every open and after each refresh, 222 entries |
+| Poster files | disk, keyed by title + URL | **Shared**; the prune keeps shelf titles, so a tab switch no longer deletes them |
+| Row list (`lastCont`/`lastFresh`) | memory, 30 s | Watching only |
+| Show-id → name map | prefs, 24 h | Watching only (the shelf uses offer links) |
+
+The practical effect: a title that appears in both places paints with its score, plot and
+cast on the first frame, with no OMDb request and no "not rated" placeholder that fills in
+a second later. Rating-sorted order is also instant for those titles, because `haveScores()`
+is satisfied by the seeded map.
+
+Two details that matter:
+
+- **Keys are matched loosely.** The shelf stores `A Knight of the Seven Kingdoms`; a row can
+  arrive with different punctuation or a trailing space. A normalized fallback lookup stops
+  that mismatch from costing an OMDb round trip.
+- **A stored `0%` Tomatometer is hidden.** The catalogue reports 0 for "no score", which was
+  rendering as a red 0% badge on both tabs.
+
 ### New seasons, by hand
 
 The live join selects on the series' **original** release year, so a returning show
@@ -405,6 +479,12 @@ So a short second row, **NEW SEASONS IN 2026**, is checked by hand: each season'
 premiere date confirmed against IMDb episode data through OMDb, its score read from the
 same JustWatch feed, its link from the JioHotstar index. The panel says it is hand-
 checked, so it never passes as part of the live join.
+
+**It still earns its tile now that the shelf covers three years.** The window is on the
+*series'* release year, and *House of the Dragon* is 2022 however new season 3 is, so
+widening 2026 → 2024–2026 does not bring it in. Without this row, a returning show from
+2021 or earlier with a 2026 season is simply absent. If it were dropped, that is what it
+would cost.
 
 | Series | Season | IMDb | Votes |
 |---|---|---|---|
@@ -520,6 +600,29 @@ docs/
   UI.md                    ten-foot UI rules: contrast floors, type scale, both themes
 tools/probe/               diagnostic APK: dumps every watch-next row and column
 ```
+
+## How the app presents itself on the wire
+
+Every outbound request goes through `Http.java`, which sets one Chrome-on-Android-TV
+fingerprint plus the headers a browser actually sends: `Accept`, `Accept-Language`, and
+`Origin`/`Referer` on the GraphQL POST. Before this, requests carried `RateMyTV/1.0` — or
+nothing, which means Java's default user agent, the most obvious bot signature there is.
+
+This is presentation, not evasion: the same public documents are requested, at the same
+rate, with no anti-bot measure bypassed. It is the difference between looking like a
+browser reading a page and looking like a crawler that a CDN can bounce.
+
+| Endpoint | Profile |
+|---|---|
+| JustWatch GraphQL | `Http.graphql` — JSON, `Origin`/`Referer` justwatch.com |
+| Hotstar robots + sitemaps | `Http.browser` |
+| OMDb ratings | `Http.json` |
+| Poster CDN | `Http.image` |
+| GitHub releases + APK | `Http.json` / `Http.browser` |
+
+Verified against the live endpoints with these exact headers: GraphQL `200`, robots `200`,
+sitemap index `200`, shows sitemap `200`; and in-app, a forced refresh still returned
+`matched 222 rated shows with an offer (2024–2026)`.
 
 ## Contributing
 

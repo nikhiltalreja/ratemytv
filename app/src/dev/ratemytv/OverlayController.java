@@ -1720,7 +1720,10 @@ public class OverlayController {
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT);
         blp.topMargin = 4;
         rightCol.addView(bookmarks, blp);
-        LinearLayout.LayoutParams rclp = new LinearLayout.LayoutParams(372,
+        // 330, not 372: the rail is the right-most child, so taking 42 px off its width
+        // shortens the RESUME pill from the left and shifts the bookmark to match - the
+        // pill's right edge, and the gap to the row border, stay exactly where they were.
+        LinearLayout.LayoutParams rclp = new LinearLayout.LayoutParams(330,
                 ViewGroup.LayoutParams.WRAP_CONTENT);
         rclp.rightMargin = 2;
         row.addView(rightCol, rclp);

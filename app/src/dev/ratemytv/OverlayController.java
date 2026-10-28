@@ -2313,7 +2313,10 @@ public class OverlayController {
         // 12 above, 16 below: the bevel's face ends 4 dp above the view's bottom (the lip
         // occupies that space), so its optical centre sits ~2 dp above the geometric one.
         // Even padding put the label visibly low on the key.
-        t.setPadding(16, 11, 16, 17);
+        // Measured on the TV: the label ink centre sat 1.5 px below the bevel face
+        // centre (the face ends 4 dp above the view bottom, where the lip is), so the
+        // padding is 2 px more on the bottom than the top.
+        t.setPadding(16, 10, 16, 18);
 
         // A beveled key, not a flat ring: bright top edge, the face falling to a darker
         // bottom, and a lip underneath. One instance per pill, because a Drawable carries

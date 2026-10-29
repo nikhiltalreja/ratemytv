@@ -73,7 +73,7 @@ public class Watcher extends NotificationListenerService {
     static volatile String CUR_SERIES;
     static volatile String CUR_POSTER;
 
-    /** The episode id sits in the manifest path: /v3/<showId>/<episodeId>/Ã¢â‚¬Â¦ */
+    /** The episode id sits in the manifest path: /v3/<showId>/<episodeId>/... */
     static void parseIds(android.media.MediaMetadata md) {
         CUR_EP_ID = null;
         CUR_SHOW_ID = null;
@@ -250,6 +250,8 @@ public class Watcher extends NotificationListenerService {
         long lastPos = -1;
         String seenPkg = null;      // package of the session we just watched
         long seenPos = -1;          // where it was when we last saw it
+    long seenDur = 0;           // its running time, so the right row is adopted
+
         long lastSeen = 0;
         long lastLearnCheck = 0;
         boolean seenHadTitle = false;
@@ -350,6 +352,7 @@ public class Watcher extends NotificationListenerService {
                         if (!isMusic(pkg) && pos > 0) {
                             seenPkg = pkg;
                             seenPos = pos;
+                            seenDur = CUR_DUR;
                             lastSeen = now;
                             seenHadTitle = CUR_TITLE != null;
                         }
@@ -372,7 +375,7 @@ public class Watcher extends NotificationListenerService {
                             && now - lastSeen < LEARN_WINDOW_MS
                             && now - lastLearnCheck > 15000) {
                         lastLearnCheck = now;
-                        Item row = rowNear(seenPkg, seenPos, 30000);
+                        Item row = rowNear(seenPkg, seenPos, seenDur, 30000);
                         if (row != null) {
                             saveLocal(Watcher.this, seenPkg, row.title, null, row.pos, row.dur);
                             Log.i(TAG, "learned " + row.title + " after leaving " + seenPkg);
@@ -394,8 +397,15 @@ public class Watcher extends NotificationListenerService {
     /** How long after leaving a player we still look for its freshly written row. */
     static final long LEARN_WINDOW_MS = 16L * 60 * 1000;
 
-    /** The row for {@code pkg} whose stored position is closest to where we stopped. */
-    Item rowNear(String pkg, long pos, long tol) {
+    /**
+     * The row for {@code pkg} whose stored position is closest to where we stopped.
+     *
+     * Position alone is not enough. Prime Video keeps a dozen part-watched rows, and a
+     * film watched from the start sits at ~0-30 s - exactly where any other barely
+     * started title sits. That is how watching Genesis wrote "Sapne Vs Everyone" into
+     * the list. The running time has to agree as well, so the wrong row cannot win.
+     */
+    Item rowNear(String pkg, long pos, long dur, long tol) {
         Item best = null;
         long bestDiff = Long.MAX_VALUE;
         try (Cursor c = queryRows(pkg)) {
@@ -404,6 +414,11 @@ public class Watcher extends NotificationListenerService {
                 if (!ofPkg(c, pkg)) continue;
                 long rpos = c.getLong(3);
                 if (rpos <= 0) continue;
+                long rdur = c.getLong(4);
+                if (dur > 0 && rdur > 0) {
+                    long slack = Math.max(120000L, dur / 20);   // 5%, never under 2 min
+                    if (Math.abs(rdur - dur) > slack) continue;
+                }
                 long diff = Math.abs(rpos - pos);
                 if (diff <= tol && diff < bestDiff) {
                     bestDiff = diff;

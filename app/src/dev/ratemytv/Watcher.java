@@ -749,6 +749,31 @@ public class Watcher extends NotificationListenerService {
         }
     }
 
+
+    /** Drop a stored record by title (case-insensitive). Returns how many went. */
+    static int forgetRow(Context c, String title) {
+        if (title == null) return 0;
+        try {
+            SharedPreferences p = c.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
+            org.json.JSONObject all = new org.json.JSONObject(p.getString("local2", "{}"));
+            java.util.List<String> gone = new java.util.ArrayList<>();
+            java.util.Iterator<String> it = all.keys();
+            while (it.hasNext()) {
+                String k = it.next();
+                if (k.equalsIgnoreCase(title.trim())) gone.add(k);
+            }
+            for (String k : gone) all.remove(k);
+            if (!gone.isEmpty()) {
+                p.edit().putString("local2", all.toString()).apply();
+                Log.i(TAG, "forgot: " + gone);
+            }
+            return gone.size();
+        } catch (Exception e) {
+            Log.w(TAG, "forgetRow: " + e);
+            return 0;
+        }
+    }
+
     /** Every locally recorded row, newest first (used by the stats tab). */
     static java.util.List<Item> localAll(Context c) {
         return localRows(c, 0);

@@ -60,6 +60,17 @@ public class GlobalButtonReceiver extends BroadcastReceiver {
             }
             return;
         }
+        if ("dev.ratemytv.FORGET".equals(intent.getAction())) {
+            // Remove one wrongly learned row. Prime publishes no metadata while it
+            // plays, so the card guesses from the provider and can guess wrong; this
+            // is the escape hatch for that, by title.
+            String title = intent.getStringExtra("title");
+            if (title != null) {
+                int n = Watcher.forgetRow(ctx, title);
+                Log.i(TAG, "forgot " + n + " row(s) for " + title);
+            }
+            return;
+        }
         if ("dev.ratemytv.CLEARHIST".equals(intent.getAction())) {
             ctx.getSharedPreferences("xray", Context.MODE_PRIVATE).edit()
                     .remove("local2").apply();

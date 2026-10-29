@@ -338,6 +338,14 @@ public class Ratings {
             if (t.matches("(19|20)\\d{2}")) { year = t; break; }
         }
 
+        // A filename that says S02E03 or 2x03 is a series, whatever the record claimed.
+        // Without this, "Severance.S02E03..." resolved to the 2006 film of the same name.
+        String kind = wantType;
+        if (clean.matches("(?i).*\\bs\\d{1,2}[\\s._-]?e\\d{1,3}\\b.*")
+                || clean.matches("(?i).*\\b\\d{1,2}x\\d{1,3}\\b.*")) {
+            kind = "series";
+        }
+
         int max = Math.min(6, tok.length);
         for (int n = 1; n <= max; n++) {
             StringBuilder q = new StringBuilder();
@@ -346,7 +354,7 @@ public class Ratings {
                 q.append(tok[i]);
             }
             String probe = q.toString();
-            Info hit = searchOne(probe, key, wantType);
+            Info hit = searchOne(probe, key, kind);
             if (hit == null) continue;
             if (!flat(hit.title).equals(flat(probe))) {
                 Log.i(TAG, "resolve: [" + probe + "] -> " + hit.title + " (not exact)");

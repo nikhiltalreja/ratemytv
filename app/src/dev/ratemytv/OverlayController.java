@@ -2780,6 +2780,15 @@ public class OverlayController {
                     }
                     final Ratings.Info fi = info;
                     if (fi == null) continue;
+                    // The catalogue answered with a real name for a filename-shaped row.
+                    // Rename the record once, so the card stops showing "The.Cycle.2026.
+                    // 1080p.WEBRip.H264-PlayfulDarkness" and starts showing the title.
+                    if (fi.title != null && it.title != null
+                            && !fi.title.equalsIgnoreCase(it.title)
+                            && it.title.matches(".*[._].*")) {
+                        GlobalButtonReceiver.rename(vCtx, it.title, fi.title);
+                        Log.i(TAG, "renamed from catalogue: " + it.title + " -> " + fi.title);
+                    }
                     ui.post(new Runnable() {
                         public void run() { apply(it, fi); }
                     });

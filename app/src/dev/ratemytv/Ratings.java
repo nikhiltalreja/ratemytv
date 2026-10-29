@@ -20,6 +20,8 @@ public class Ratings {
     static final String TAG = "RATEMYTV";
 
     static class Info {
+        /** The catalogue's own name for this title, when it answered with one. */
+        String title;
         String year, runtime, genre, imdb, imdbVotes, rt, mc, plot, actors, type, poster;
     }
 
@@ -225,6 +227,10 @@ public class Ratings {
                 // forever. The catalogue cache holds the same answer for a week regardless.
                 return i;
             }
+            // Last resort: the title may be a filename ("The.Cycle.2026.1080p...").
+            // Search + exact-match verification, then cache whatever it found.
+            Info resolved = resolve(c, title, wantType);
+            if (resolved != null) return resolved;
             rememberMiss(c, title, wantType);
             return null;
         }
@@ -272,6 +278,110 @@ public class Ratings {
 
     static Info fetch(String title, String apiKey) {
         return fetch(title, apiKey, null);
+    }
+
+    /** OMDb record -> Info. One mapping, so the two paths cannot drift. */
+    static Info fromJson(org.json.JSONObject o) {
+        if (o == null || !"True".equals(o.optString("Response"))) return null;
+        Info i = new Info();
+        i.title = clean(o.optString("Title"));
+        i.year = clean(o.optString("Year"));
+        i.runtime = clean(o.optString("Runtime"));
+        String g = o.optString("Genre");
+        i.genre = g.isEmpty() || "N/A".equals(g) ? null : g.split(",")[0].trim();
+        i.imdb = clean(o.optString("imdbRating"));
+        i.imdbVotes = votes(o.optString("imdbVotes"));
+        i.mc = clean(o.optString("Metascore"));
+        i.plot = clean(o.optString("Plot"));
+        i.actors = clean(o.optString("Actors"));
+        i.type = clean(o.optString("Type"));
+        i.poster = clean(o.optString("Poster"));
+        try {
+            org.json.JSONArray arr = o.optJSONArray("Ratings");
+            if (arr != null) {
+                for (int k = 0; k < arr.length(); k++) {
+                    org.json.JSONObject r = arr.getJSONObject(k);
+                    if ("Rotten Tomatoes".equals(r.optString("Source"))) {
+                        i.rt = r.optString("Value");
+                    }
+                }
+            }
+        } catch (Exception ignored) { }
+        return i;
+    }
+
+    /** Lower-case, punctuation and spacing flattened, for exact-match checks. */
+    static String flat(String s) {
+        if (s == null) return "";
+        return s.toLowerCase(java.util.Locale.US)
+                .replaceAll("[^a-z0-9]+", " ").trim();
+    }
+
+    /**
+     * Resolve a filename-like title by asking the catalogue to search, then verifying.
+     *
+     * No tag vocabulary: we hand the catalogue progressively longer prefixes ("Severance",
+     * "Severance S02E03", ...) and accept a hit only when its own title equals the prefix
+     * and its year matches a year in the filename. That is what stops "The Cycle 2026"
+     * resolving to "The Pendragon Cycle" - close is not good enough, because a wrong
+     * score is worse than no score.
+     */
+    static Info resolve(Context c, String raw, String wantType) {
+        String key = key(c);
+        if (key == null || raw == null) return null;
+        String clean = raw.replaceAll("[._]", " ").replaceAll("\\s+", " ").trim();
+        String[] tok = clean.split(" ");
+        if (tok.length < 2) return null;
+
+        String year = null;
+        for (String t : tok) {
+            if (t.matches("(19|20)\\d{2}")) { year = t; break; }
+        }
+
+        int max = Math.min(6, tok.length);
+        for (int n = 1; n <= max; n++) {
+            StringBuilder q = new StringBuilder();
+            for (int i = 0; i < n; i++) {
+                if (i > 0) q.append(' ');
+                q.append(tok[i]);
+            }
+            String probe = q.toString();
+            Info hit = searchOne(probe, key, wantType);
+            if (hit == null) continue;
+            if (!flat(hit.title).equals(flat(probe))) {
+                Log.i(TAG, "resolve: [" + probe + "] -> " + hit.title + " (not exact)");
+                continue;
+            }
+            if (year != null && hit.year != null && !hit.year.startsWith(year)) {
+                Log.i(TAG, "resolve: [" + probe + "] -> " + hit.title + " (" + hit.year
+                        + ") wrong year");
+                continue;
+            }
+            Log.i(TAG, "resolve: " + raw + " -> " + hit.title + " (" + hit.year + ")");
+            remember(c, raw, wantType, hit);
+            return hit;
+        }
+        return null;
+    }
+
+    /** First search hit for a query, expanded to a full record by its id. */
+    static Info searchOne(String q, String apiKey, String wantType) {
+        try {
+            String typeQ = wantType == null ? "" : "&type=" + enc(wantType);
+            JSONObject s = get("https://www.omdbapi.com/?s=" + enc(q) + typeQ
+                    + "&apikey=" + enc(apiKey));
+            JSONArray arr = s == null ? null : s.optJSONArray("Search");
+            if (arr == null || arr.length() == 0) return null;
+            JSONObject m = arr.getJSONObject(0);
+            JSONObject byId = get("https://www.omdbapi.com/?i="
+                    + enc(m.optString("imdbID")) + "&apikey=" + enc(apiKey));
+            if (byId == null || !"True".equals(byId.optString("Response"))) return null;
+            Info i = fromJson(byId);
+            return i;
+        } catch (Exception e) {
+            Log.w(TAG, "searchOne: " + e);
+            return null;
+        }
     }
 
     static Info fetch(String title, String apiKey, String wantType) {
